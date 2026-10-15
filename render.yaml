@@ -1,0 +1,35 @@
+# Render blueprint for the API. The web app deploys to Vercel with INFERRA_API_URL pointing here.
+services:
+  - type: web
+    name: inferra-api
+    runtime: docker
+    dockerfilePath: services/api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: INFERRA_ENV
+        value: production
+      - key: INFERRA_DATABASE_URL
+        sync: false
+      - key: INFERRA_SECRET_KEY
+        generateValue: true
+      - key: INFERRA_WEB_ORIGIN
+        sync: false
+      - key: INFERRA_STORAGE_BACKEND
+        value: s3
+      - key: INFERRA_S3_BUCKET
+        sync: false
+      - key: INFERRA_S3_ENDPOINT_URL
+        sync: false
+      - key: INFERRA_S3_ACCESS_KEY_ID
+        sync: false
+      - key: INFERRA_S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: INFERRA_GITHUB_CLIENT_ID
+        sync: false
+      - key: INFERRA_GITHUB_CLIENT_SECRET
+        sync: false
+      - key: INFERRA_LLM_MODEL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false

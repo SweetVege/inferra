@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  color-scheme: light;
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --surface-2: #f2f1ee;
+  --border: #e4e2dd;
+  --text: #121211;
+  --text-2: #52514e;
+  --text-3: #7c7b76;
+  --accent: #2a63c9;
+  --accent-soft: #e8effb;
+  --accent-text: #ffffff;
+  --series-1: #2a78d6;
+  --good: #137a3f;
+  --good-soft: #e6f4ec;
+  --warn: #9a5b00;
+  --warn-soft: #fbf1df;
+  --bad: #b42323;
+  --bad-soft: #fbe9e9;
+  --code-bg: #f4f3f0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #121211;
+    --surface: #1a1a19;
+    --surface-2: #232321;
+    --border: #2f2f2c;
+    --text: #f0efec;
+    --text-2: #c3c2b7;
+    --text-3: #8f8e86;
+    --accent: #5b8fe8;
+    --accent-soft: #1d2a40;
+    --accent-text: #0b0b0b;
+    --series-1: #3987e5;
+    --good: #4cc27f;
+    --good-soft: #15291d;
+    --warn: #e0a64a;
+    --warn-soft: #2d2313;
+    --bad: #f07575;
+    --bad-soft: #321a1a;
+    --code-bg: #20201e;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121211;
+  --surface: #1a1a19;
+  --surface-2: #232321;
+  --border: #2f2f2c;
+  --text: #f0efec;
+  --text-2: #c3c2b7;
+  --text-3: #8f8e86;
+  --accent: #5b8fe8;
+  --accent-soft: #1d2a40;
+  --accent-text: #0b0b0b;
+  --series-1: #3987e5;
+  --good: #4cc27f;
+  --good-soft: #15291d;
+  --warn: #e0a64a;
+  --warn-soft: #2d2313;
+  --bad: #f07575;
+  --bad-soft: #321a1a;
+  --code-bg: #20201e;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--border);
+  --color-ink: var(--text);
+  --color-ink-2: var(--text-2);
+  --color-ink-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-text);
+  --color-series-1: var(--series-1);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-code: var(--code-bg);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
