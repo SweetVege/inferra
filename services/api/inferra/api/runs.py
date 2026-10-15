@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from inferra.api.schemas import (
+    InsightFeedItem,
     InsightOut,
     InsightReview,
     RunAnswer,
@@ -195,3 +196,34 @@ def review_insight(
     insight.reviewed_at = datetime.now(UTC) if body.status != "draft" else None
     db.commit()
     return insight
+
+
+@router.get("/insights", response_model=list[InsightFeedItem])
+def insight_feed(
+    status: str | None = None,
+    verified: bool | None = None,
+    access: WorkspaceAccess = Depends(workspace_access),
+    db: Session = Depends(get_db),
+) -> list[InsightFeedItem]:
+    """Insights across all runs in the workspace, newest first."""
+    query = (
+        select(Insight, Run.goal, Run.intent)
+        .join(Run, Run.id == Insight.run_id)
+        .where(Run.workspace_id == access.workspace.id)
+    )
+    if status:
+        query = query.where(Insight.status == status)
+    if verified is not None:
+        query = query.where(Insight.verified.is_(verified))
+    rows = db.execute(query.order_by(Insight.created_at.desc(), Insight.position).limit(200)).all()
+    return [
+        InsightFeedItem.model_validate(
+            {
+                **InsightOut.model_validate(i).model_dump(),
+                "run_goal": goal,
+                "run_intent": intent,
+                "created_at": i.created_at,
+            }
+        )
+        for i, goal, intent in rows
+    ]

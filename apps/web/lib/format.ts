@@ -39,3 +39,10 @@ export function timeAgo(iso: string): string {
 export function titleCase(text: string): string {
   return text.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 }
+
+export function formatMetric(value: number | null | undefined, format: string): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  if (format === "percent") return formatPercent(value, 2);
+  if (format === "currency") return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatNumber(value);
+}

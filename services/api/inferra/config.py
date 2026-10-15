@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     max_insight_revisions: int = 2
     max_upload_mb: int = 50
     sql_row_limit: int = 200
+    extract_max_rows: int = 2_000_000
+    allow_private_db_hosts: bool | None = None  # defaults to True outside production
+
+    def model_post_init(self, _context: object) -> None:
+        if self.allow_private_db_hosts is None:
+            self.allow_private_db_hosts = self.env != "production"
 
     @property
     def dev_login_enabled(self) -> bool:

@@ -51,6 +51,7 @@ class ToolOutput:
 class ToolContext:
     source: DataSource
     row_limit: int = 200
+    metrics: dict[str, dict[str, Any]] = field(default_factory=dict)  # defined metrics by name
 
 
 @dataclass
@@ -100,7 +101,7 @@ def get_tools(names: list[str]) -> list[Tool]:
 
 def _load_all() -> None:
     # Importing the modules registers their tools.
-    from inferra.tools import analysis, experiment, ml, modeling, profiling  # noqa: F401
+    from inferra.tools import analysis, experiment, metrics, ml, modeling, profiling  # noqa: F401
 
 
 def round_floats(value: Any, digits: int = 8) -> Any:

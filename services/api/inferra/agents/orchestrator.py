@@ -75,6 +75,7 @@ def plan_goal(
     clarifications: list[dict[str, str]],
     llm: LLMClient,
     rec: Recorder,
+    metrics: list[dict[str, Any]] | None = None,
 ) -> PlanDecision:
     catalog = dataset_catalog(datasets)
     valid_ids = {d.id for d in datasets}
@@ -89,6 +90,12 @@ def plan_goal(
         "",
         f"Datasets the user selected: {selected_ids or 'none (choose what is needed)'}",
     ]
+    if metrics:
+        lines += [
+            "",
+            "Defined metrics (prefer these when the goal mentions them):",
+            *[f"- {m['name']}: {m['label']} on table {m['table']} ({m['kind']})" for m in metrics],
+        ]
     answered = [c for c in clarifications if c.get("answer")]
     if answered:
         lines += ["", "Clarifications so far:"]

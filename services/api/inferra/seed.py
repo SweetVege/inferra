@@ -13,7 +13,7 @@ from sqlalchemy import select
 from inferra import storage
 from inferra.auth.accounts import demo_user, demo_workspace
 from inferra.datasources.registry import datasource_for
-from inferra.db.models import Base, Dataset, Insight, Model, Run, Workspace
+from inferra.db.models import Base, Dataset, Insight, MetricDefinition, Model, Run, Workspace
 from inferra.db.session import get_engine, session_scope
 from inferra.llm.demo_script import demo_script
 from inferra.llm.gateway import set_llm_factory
@@ -50,6 +50,43 @@ DEMO_RUNS = [
         "of 2026-04-06.",
         "goal": "Did the loyalty program increase weekly store sales?",
         "accept": 0,
+    },
+    {
+        "file": "daily_funnel.csv",
+        "description": "Daily sessions, signups, and revenue by platform, app version, channel, and country.",
+        "goal": "Why did signup conversion drop in late September?",
+        "accept": 0,
+        "metrics": [
+            {
+                "name": "conversion_rate",
+                "label": "Signup conversion rate",
+                "description": "Signups divided by sessions.",
+                "kind": "ratio",
+                "numerator": {"kind": "sum", "column": "signups"},
+                "denominator": {"kind": "sum", "column": "sessions"},
+                "time_column": "date",
+                "dimensions": ["platform", "app_version", "channel", "country"],
+                "format": "percent",
+            },
+            {
+                "name": "sessions",
+                "label": "Sessions",
+                "kind": "sum",
+                "column": "sessions",
+                "time_column": "date",
+                "dimensions": ["platform", "channel", "country"],
+            },
+            {
+                "name": "revenue_per_session",
+                "label": "Revenue per session",
+                "kind": "ratio",
+                "numerator": {"kind": "sum", "column": "revenue"},
+                "denominator": {"kind": "sum", "column": "sessions"},
+                "time_column": "date",
+                "dimensions": ["platform", "channel"],
+                "format": "currency",
+            },
+        ],
     },
     {
         "file": "daily_sales.csv",
@@ -92,6 +129,9 @@ def seed_demo(reset: bool = False) -> str:
                 db, ws.id, samples_dir() / spec["file"], spec["file"], None, description=spec["description"]
             )
             dataset.profile = profile_table(datasource_for(db, ws.id, [dataset.id]), dataset.table_name)
+            for metric in spec.get("metrics", []):
+                db.add(MetricDefinition(workspace_id=ws.id, dataset_id=dataset.id, **metric))
+            db.flush()
             run = Run(workspace_id=ws.id, created_by=user.id, goal=spec["goal"], dataset_ids=[dataset.id])
             db.add(run)
             db.flush()

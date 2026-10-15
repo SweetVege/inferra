@@ -17,12 +17,14 @@ export interface Series {
 export function LineChart({
   series,
   marker,
+  flags = [],
   height = 200,
   label,
   format = (v: number) => formatNumber(v),
 }: {
   series: Series[];
   marker?: { x: string; label: string };
+  flags?: { x: string; y: number }[];
   height?: number;
   label: string;
   format?: (v: number) => string;
@@ -54,7 +56,8 @@ export function LineChart({
 
   return (
     <figure className="space-y-2">
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-2">
+      {/* A single series is named by its title; a legend only helps when there are several. */}
+      <div className={series.length > 1 ? "flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-2" : "hidden"}>
         {series.map((s) => (
           <span key={s.name} className="inline-flex items-center gap-1.5">
             <svg width="16" height="8" aria-hidden>
@@ -111,6 +114,13 @@ export function LineChart({
         {series.map((s) => (
           <path key={s.name} d={path(s.points)} fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeDasharray={s.dashed ? "5 4" : undefined} />
         ))}
+        {flags.map((f) =>
+          index.has(f.x) ? (
+            <circle key={`flag-${f.x}`} cx={px(index.get(f.x)!)} cy={py(f.y)} r="4.5" fill="var(--surface)" stroke="var(--bad)" strokeWidth="2">
+              <title>{`${f.x}: anomaly`}</title>
+            </circle>
+          ) : null,
+        )}
         {hoverX && (
           <g>
             <line x1={px(hover!)} x2={px(hover!)} y1={m.t} y2={height - m.b} stroke="var(--text-3)" strokeOpacity="0.5" />
@@ -193,5 +203,30 @@ export function IntervalPlot({
         </div>
       ))}
     </figure>
+  );
+}
+
+/** Signed bars around a zero line: positive values in one hue, negative in another. */
+export function DivergingBars({ rows, format }: { rows: { label: string; value: number; note?: string }[]; format: (v: number) => string }) {
+  const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1e-12);
+  return (
+    <ul className="space-y-1.5">
+      {rows.map((r) => {
+        const width = `${Math.max(1, (Math.abs(r.value) / max) * 50)}%`;
+        return (
+          <li key={r.label} className="grid grid-cols-[minmax(0,8rem)_1fr_auto] items-center gap-2 text-xs" title={r.note}>
+            <span className="truncate text-ink-2">{r.label}</span>
+            <span className="relative h-3">
+              <span className="absolute inset-y-0 left-1/2 border-l border-ink-3" />
+              <span
+                className={r.value < 0 ? "absolute inset-y-0 rounded-l-[4px] bg-series-2" : "absolute inset-y-0 rounded-r-[4px] bg-series-1"}
+                style={r.value < 0 ? { right: "50%", width } : { left: "50%", width }}
+              />
+            </span>
+            <span className="tabular w-20 text-right text-ink-2">{format(r.value)}</span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

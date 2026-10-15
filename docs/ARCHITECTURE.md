@@ -172,8 +172,9 @@ The **Verifier** is deterministic code that runs on every draft:
 5. **Intervals.** A cited p-value, effect estimate, or forecast needs its interval from the same result.
 6. **Multiple comparisons.** Segment results must cite Holm-adjusted p-values.
 7. **Sample ratio.** An experiment that failed its SRM check can only appear as a low-confidence insight that discloses the broken assignment.
-8. **Assumptions.** Causal wording from an observational method (difference-in-differences, matching) needs a passing method check (parallel pre-trends, covariate balance) and a caveat naming the identifying assumption.
-9. **Held-out metrics.** Model performance must be cited from holdout or cross-validation results, never training metrics; forecasts must be cited with their prediction interval.
+8. **Labels.** Numbers inside category labels of cited results (a version "5.2", a date) may be repeated without a citation; free text such as SQL is excluded.
+9. **Assumptions.** Causal wording from an observational method (difference-in-differences, matching) needs a passing method check (parallel pre-trends, covariate balance) and a caveat naming the identifying assumption.
+10. **Held-out metrics.** Model performance must be cited from holdout or cross-validation results, never training metrics; forecasts must be cited with their prediction interval.
 
 The verifier checks that numbers are grounded and that the wording matches the strength of the evidence; it cannot judge whether the reasoning connecting them is right. That is what human review is for.
 
@@ -185,19 +186,38 @@ Only **accepted or edited** insights can be published into a report.
 
 ```python
 class DataSource(Protocol):
-    def list_tables(self) -> list[TableRef]: ...
-    def get_schema(self, table: TableRef) -> Schema: ...
-    def sample(self, table: TableRef, n: int) -> Arrow: ...
-    def query(self, sql: str, limit: int | None) -> Arrow: ...   # read-only
+    def list_tables(self) -> list[TableInfo]: ...
+    def query(self, sql: str, limit: int | None = None) -> QueryResult:  # one read-only SELECT
+    def query_frame(self, sql: str) -> pd.DataFrame: ...                # for modeling tools
+    def quote(self, identifier: str) -> str: ...
 ```
 
-| Adapter | Phase | Notes |
-|---|---|---|
-| `FileSource` | MVP | CSV/Parquet/XLSX uploaded → normalized to Parquet in object storage → queried with DuckDB |
-| `PostgresSource` | Phase 3 | Read-only role; query pushdown; per-query row and time limits |
-| `BigQuerySource`, `SnowflakeSource` | Phase 4 | Service-account / key-pair auth; cost guard (dry-run bytes estimate before execution) |
+Every dataset, whatever its origin, is a Parquet file queried by a sandboxed in-process DuckDB
+(single SELECT, file access limited to the workspace's directory, configuration locked). Tools never
+see where data came from.
 
-Tools only see `DataSource`, so analysis code is identical whether data came from a file or a warehouse. Large results are summarized in-database; only aggregated or sampled data is pulled into Python.
+| Source | Phase | How it works |
+|---|---|---|
+| File upload | MVP | CSV/TSV/Parquet/Excel normalized to Parquet in object storage |
+| Postgres | Phase 3 | **Extracts.** A connection (password encrypted with a key derived from the app secret) pulls a table or a custom query into Parquet. Sessions are read-only (`default_transaction_read_only`) with a statement timeout; custom SQL runs as a subquery on a server-side cursor, which accepts exactly one SELECT. Private and loopback hosts are refused in production. Extracts refresh on demand. |
+| BigQuery, Snowflake | Phase 4 | Same extract model, with a dry-run cost estimate before pulling |
+
+**Why extracts instead of live pushdown.** Live queries would require either translating every
+tool's SQL into each warehouse dialect or loading DuckDB's network extensions at runtime. Extracts
+keep one SQL dialect, one sandbox, and one tested code path for every tool, at the cost of freshness
+(refresh is explicit and the extract records when it was taken) and a row cap (aggregate in the
+source query for large tables). Live pushdown for aggregate-only tools is a possible later step.
+
+### Metric layer
+
+A metric is a structured definition, not free SQL: `sum`, `count`, `count_distinct`, `average`, or
+`ratio` of two parts, plus an optional filter, time column, suggested dimensions, and display format.
+Definitions are validated by computing them once, then passed to every run so agents compute
+"conversion rate" exactly as the workspace defines it. The structure is what makes diagnosis exact:
+a ratio's change between two periods splits into a **mix effect** (segment weights moved, measured
+against the baseline average) and a **rate effect** (segment rates moved), and the pieces sum to the
+total change for every dimension. Dimensions are ranked by how much more of the change their top
+segment carries than its share of the volume.
 
 ## 8. Core data model
 
@@ -217,6 +237,8 @@ erDiagram
   Report }o--o{ Insight : includes
   Workspace ||--o{ Experiment : registers
   Workspace ||--o{ Model : registers
+  Workspace ||--o{ Connection : connects
+  Connection ||--o{ Dataset : extracts
   Run ||--o{ Model : trains
   Workspace ||--o{ MetricDefinition : defines
 ```
@@ -242,9 +264,10 @@ inferra/
 │  │  ├─ agents/              # orchestrator.py, specialist.py (Data, Analyst, Experiment, ML), insight.py, prompts.py
 │  │  ├─ workflows/           # intent templates
 │  │  ├─ runtime/             # job queue, run executor, recorder (tool calls, artifacts, events)
-│  │  ├─ tools/               # typed tools: profiling, SQL, experiments, modeling (regression, DiD, PSM, forecast), ml
+│  │  ├─ tools/               # typed tools: profiling, SQL, metrics, experiments, modeling, ml
+│  │  ├─ metrics_layer.py     # metric definitions -> tool specs
 │  │  ├─ verify/              # deterministic insight verifier
-│  │  ├─ datasources/         # DataSource protocol, sandboxed DuckDB file source
+│  │  ├─ datasources/         # DataSource protocol, sandboxed DuckDB source, Postgres extracts
 │  │  ├─ llm/                 # Claude gateway, scripted client, demo script
 │  │  ├─ db/                  # SQLAlchemy models and sessions
 │  │  └─ seed.py              # demo workspace

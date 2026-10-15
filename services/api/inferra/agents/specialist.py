@@ -28,7 +28,7 @@ SPECIALISTS: dict[str, AgentSpec] = {
         "data",
         "Data Agent",
         prompts.DATA_AGENT,
-        ("list_tables", "profile_dataset", "summarize_column", "run_sql"),
+        ("list_tables", "list_metrics", "profile_dataset", "summarize_column", "run_sql", "compute_metric"),
     ),
     "analyst": AgentSpec(
         "analyst",
@@ -36,10 +36,14 @@ SPECIALISTS: dict[str, AgentSpec] = {
         prompts.ANALYST_AGENT,
         (
             "list_tables",
+            "list_metrics",
             "run_sql",
             "summarize_column",
             "group_summary",
             "correlations",
+            "compute_metric",
+            "detect_anomalies",
+            "decompose_change",
             "fit_regression",
             "diff_in_diff",
             "propensity_match",

@@ -64,6 +64,18 @@ MODELING_ROUTES: list[tuple[re.Pattern[str], str, str, str, dict[str, str]]] = [
         },
     ),
     (
+        re.compile(r"\b(why|drop|declin)", re.I),
+        "daily_funnel",
+        "diagnose",
+        "The user wants to know why a metric moved: a diagnosis.",
+        {
+            "metric": "conversion_rate",
+            "comparison_period": "",
+            "baseline_period": "",
+            "dimensions": "platform, app_version, channel, country",
+        },
+    ),
+    (
         re.compile(r"\bforecast", re.I),
         "daily_sales",
         "forecast",
@@ -187,6 +199,8 @@ def analyst_agent(req: Request) -> list[Any]:
                 },
             )
         ]
+    if "(intent: diagnose)" in req.first_user_text:
+        return _diagnose_steps(table, results)
     if "(intent: forecast)" in req.first_user_text:
         if not results:
             return [
@@ -265,6 +279,8 @@ def insights(req: Request) -> list[Any]:
         return experiment_insights(arts)
     if any(k.startswith("Difference-in-differences:") for k in arts):
         return did_insights(arts)
+    if any(k.startswith("What moved") for k in arts):
+        return diagnose_insights(arts)
     if any(k.startswith("Forecast:") for k in arts):
         return forecast_insights(arts)
     if any(k.startswith("Model:") for k in arts):
@@ -559,6 +575,124 @@ def _ev(art: dict[str, Any], path: str) -> dict[str, Any]:
 
 def _money(x: float) -> str:
     return f"${x:,.2f}"
+
+
+def _diagnose_steps(table: str, results: list[dict[str, Any]]) -> list[Any]:
+    import datetime as dt
+
+    if not results:
+        return [ToolUseBlock("detect_anomalies", {"metric": "conversion_rate", "grain": "day"})]
+    change = results[0]["result"]["change_point"]
+    start = dt.date.fromisoformat(change["period"])
+    days = change["periods_after"]
+    comp_end = start + dt.timedelta(days=days - 1)
+    base_start, base_end = start - dt.timedelta(days=days), start - dt.timedelta(days=1)
+    if len(results) == 1:
+        return [
+            ToolUseBlock(
+                "decompose_change",
+                {
+                    "metric": "conversion_rate",
+                    "baseline_start": base_start.isoformat(),
+                    "baseline_end": base_end.isoformat(),
+                    "comparison_start": start.isoformat(),
+                    "comparison_end": comp_end.isoformat(),
+                    "dimensions": ["platform", "app_version", "channel", "country"],
+                },
+            )
+        ]
+    if len(results) == 2:
+        top = results[1]["result"]["dimensions"][0]
+        return [
+            ToolUseBlock(
+                "compute_metric",
+                {
+                    "metric": "conversion_rate",
+                    "group_by": ["app_version"],
+                    "where": "platform = 'android'",
+                    "start": start.isoformat(),
+                    "end": comp_end.isoformat(),
+                    "title": f"Android conversion by app version since {start.isoformat()} (top: {top['dimension']})",
+                },
+            )
+        ]
+    ids = [r["artifact_id"] for r in results]
+    return [
+        ToolUseBlock(
+            "finish_step",
+            {
+                "summary": f"Change point {change['period']} ({ids[0]}); decomposition ({ids[1]}) ranks "
+                f"{results[1]['result']['dimensions'][0]['dimension']} first; Android by version ({ids[2]}).",
+                "key_artifact_ids": ids,
+            },
+        )
+    ]
+
+
+def diagnose_insights(arts: dict[str, dict[str, Any]]) -> list[Any]:
+    anomalies = next(v for k, v in arts.items() if k.startswith("Anomalies in"))
+    decomposition = next(v for k, v in arts.items() if k.startswith("What moved"))
+    drill = next(v for k, v in arts.items() if k.startswith("Android conversion by app version"))
+    cp = anomalies["data"]["change_point"]
+    dims = decomposition["data"]["dimensions"]
+    di = next(i for i, d in enumerate(dims) if d["dimension"] == "app_version")
+    segs = dims[di]["segments"]
+    si = next(i for i, sg in enumerate(segs) if sg["segment"] == dims[di]["top_segment"])
+    seg = segs[si]
+    rows = drill["data"]["rows"]
+    old_i = next(i for i, r in enumerate(rows) if r["app_version"] != seg["segment"])
+    new_i = next(i for i, r in enumerate(rows) if r["app_version"] == seg["segment"])
+    out = [
+        {
+            "title": f"Conversion stepped down on {cp['period']}",
+            "claim": f"Signup conversion averaged {_pct(cp['before_mean'], 2)} before {cp['period']} and "
+            f"{_pct(cp['after_mean'], 2)} after, a {_pct(abs(cp['relative_change']))} decline.",
+            "evidence": [
+                _ev(anomalies, "change_point.period"),
+                _ev(anomalies, "change_point.before_mean"),
+                _ev(anomalies, "change_point.after_mean"),
+                _ev(anomalies, "change_point.relative_change"),
+            ],
+            "method": "Least-squares change point on the daily conversion series, with robust anomaly scores.",
+            "caveats": [
+                f"Daily averages; the {cp['periods_after']} days after the change are compared with all earlier days."
+            ],
+            "recommended_action": "Check releases and campaigns that shipped around that date.",
+            "confidence": "high",
+        },
+        {
+            "title": f"App version {seg['segment']} accounts for most of the decline",
+            "claim": f"Version {seg['segment']} accounts for {_pct(seg['share_of_change'])} of the drop in conversion "
+            f"while carrying {_pct(seg['comparison_weight'])} of sessions; it converts at "
+            f"{_pct(seg['comparison_value'], 2)} against a baseline of {_pct(decomposition['data']['baseline']['value'], 2)}.",
+            "evidence": [
+                _ev(decomposition, f"dimensions.{di}.segments.{si}.share_of_change"),
+                _ev(decomposition, f"dimensions.{di}.segments.{si}.comparison_weight"),
+                _ev(decomposition, f"dimensions.{di}.segments.{si}.comparison_value"),
+                _ev(decomposition, "baseline.value"),
+            ],
+            "method": "Mix/rate decomposition of the conversion-rate change across platform, app version, channel, and country.",
+            "caveats": [
+                "A decomposition attributes the change arithmetically; it does not prove what is broken in the release."
+            ],
+            "recommended_action": f"Roll back or hotfix version {seg['segment']} and test its signup flow end to end.",
+            "confidence": "high",
+        },
+        {
+            "title": "Older Android builds still convert normally",
+            "claim": f"On Android over the same days, version {rows[old_i]['app_version']} converts at "
+            f"{_pct(rows[old_i]['value'], 2)} while version {rows[new_i]['app_version']} converts at "
+            f"{_pct(rows[new_i]['value'], 2)}.",
+            "evidence": [_ev(drill, f"rows.{old_i}.value"), _ev(drill, f"rows.{new_i}.value")],
+            "method": "Conversion rate by app version, Android only, during the changed period.",
+            "caveats": [
+                "Users self-select into updating, so early adopters may differ; the gap is large enough to act on."
+            ],
+            "recommended_action": "Compare funnels step by step between the two versions to locate the failing step.",
+            "confidence": "medium",
+        },
+    ]
+    return [ToolUseBlock("submit_insights", {"insights": out})]
 
 
 def did_insights(arts: dict[str, dict[str, Any]]) -> list[Any]:

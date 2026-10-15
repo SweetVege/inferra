@@ -139,6 +139,45 @@ def daily_sales(days: int = 540) -> None:
     _write("daily_sales.csv", out)
 
 
+def daily_funnel() -> None:
+    """Daily sessions and signups by platform, app version, channel, and country. An Android release
+    (5.2) rolls out on 2026-09-21 with a checkout bug that cuts its conversion; paid traffic also grows."""
+    rng = random.Random(41)
+    start, days = date(2026, 6, 15), 119
+    release = date(2026, 9, 21)
+    platforms = {"ios": 0.36, "android": 0.40, "web": 0.24}
+    channels = {"organic": (0.55, 0.062), "paid": (0.30, 0.041), "email": (0.15, 0.085)}
+    countries = {"US": 0.5, "UK": 0.3, "DE": 0.2}
+    platform_rate = {"ios": 1.1, "android": 1.0, "web": 0.9}
+    out = []
+    for d in range(days):
+        day = start + timedelta(days=d)
+        weekly = [1.0, 1.02, 1.0, 0.98, 0.95, 0.82, 0.85][day.weekday()]
+        base_sessions = 9000 * weekly * (1 + 0.0015 * d)
+        paid_boost = 1.25 if day >= release - timedelta(days=7) else 1.0
+        rollout = min(1.0, max(0.0, (day - release).days / 5 + 0.2)) if day >= release else 0.0
+        for platform, p_share in platforms.items():
+            versions = {"ios": [("8.4", 1.0)], "web": [("web", 1.0)]}.get(
+                platform, [("5.1", 1 - rollout), ("5.2", rollout)]
+            )
+            for version, v_share in versions:
+                if v_share <= 0:
+                    continue
+                for channel, (c_share, c_rate) in channels.items():
+                    c_weight = c_share * (paid_boost if channel == "paid" else 1.0)
+                    for country, k_share in countries.items():
+                        sessions = base_sessions * p_share * v_share * c_weight * k_share * rng.lognormvariate(0, 0.08)
+                        sessions = max(1, round(sessions))
+                        rate = c_rate * platform_rate[platform] * (0.55 if version == "5.2" else 1.0)
+                        signups = sum(1 for _ in range(sessions) if rng.random() < rate)
+                        out.append({
+                            "date": day.isoformat(), "platform": platform, "app_version": version,
+                            "channel": channel, "country": country, "sessions": sessions, "signups": signups,
+                            "revenue": round(signups * rng.lognormvariate(3.4, 0.1), 2),
+                        })
+    _write("daily_funnel.csv", out)
+
+
 def _write(name: str, rows: list[dict]) -> None:
     with (OUT / name).open("w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
@@ -153,3 +192,4 @@ if __name__ == "__main__":
     customer_churn()
     loyalty_program()
     daily_sales()
+    daily_funnel()

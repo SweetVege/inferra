@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft, RefreshCw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -10,7 +10,7 @@ import { ProfileView } from "@/components/profile-view";
 import { canEdit, useWorkspace } from "@/components/session";
 import { Button, Card, ErrorBanner, SectionTitle, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
-import { formatNumber } from "@/lib/format";
+import { formatNumber, timeAgo } from "@/lib/format";
 import type { DatasetDetail } from "@/lib/types";
 
 export default function DatasetPage() {
@@ -19,6 +19,7 @@ export default function DatasetPage() {
   const editable = canEdit(useWorkspace(ws));
   const [dataset, setDataset] = useState<DatasetDetail | null>(null);
   const [profiling, setProfiling] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,6 +34,19 @@ export default function DatasetPage() {
       setError(err instanceof Error ? err.message : "Profiling failed.");
     } finally {
       setProfiling(false);
+    }
+  }
+
+  async function refresh() {
+    setRefreshing(true);
+    setError(null);
+    try {
+      await api.post(`/workspaces/${ws}/datasets/${id}/refresh`);
+      setDataset(await api.get<DatasetDetail>(`/workspaces/${ws}/datasets/${id}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Refresh failed.");
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -55,12 +69,20 @@ export default function DatasetPage() {
             <p className="tabular text-sm text-ink-3">
               <code className="font-mono">{dataset.table_name}</code> · {formatNumber(dataset.row_count)} rows · {dataset.columns.length} columns
               {dataset.original_filename && ` · ${dataset.original_filename}`}
+              {dataset.synced_at && ` · extracted ${timeAgo(dataset.synced_at)}`}
             </p>
           </div>
           {editable && (
-            <Button variant="danger" size="sm" onClick={() => void remove()}>
-              <Trash2 className="size-4" aria-hidden /> Delete
-            </Button>
+            <div className="flex gap-2">
+              {dataset.connection_id && (
+                <Button size="sm" loading={refreshing} onClick={() => void refresh()}>
+                  <RefreshCw className="size-4" aria-hidden /> Refresh extract
+                </Button>
+              )}
+              <Button variant="danger" size="sm" onClick={() => void remove()}>
+                <Trash2 className="size-4" aria-hidden /> Delete
+              </Button>
+            </div>
           )}
         </div>
         {dataset.description && <p className="max-w-2xl text-ink-2">{dataset.description}</p>}

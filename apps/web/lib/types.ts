@@ -52,6 +52,8 @@ export interface Dataset {
   columns: Column[];
   has_profile: boolean;
   created_at: string;
+  connection_id: string | null;
+  synced_at: string | null;
 }
 
 export interface HistogramBin {
@@ -270,4 +272,55 @@ export interface ModelCard {
 
 export interface ModelDetail extends ModelSummary {
   card: ModelCard;
+}
+
+export interface MetricPart {
+  kind: "sum" | "count" | "count_distinct";
+  column: string | null;
+}
+
+export interface MetricDefinition {
+  id: string;
+  dataset_id: string;
+  dataset_name: string | null;
+  name: string;
+  label: string;
+  description: string | null;
+  kind: "sum" | "count" | "count_distinct" | "average" | "ratio";
+  column: string | null;
+  numerator: MetricPart | null;
+  denominator: MetricPart | null;
+  filter: string | null;
+  time_column: string | null;
+  dimensions: string[];
+  format: "number" | "percent" | "currency";
+  created_at: string;
+  current_value: number | null;
+}
+
+export interface MetricValues {
+  total: { value: number | null };
+  grain: string;
+  series: { period: string; value: number | null }[];
+}
+
+export interface Connection {
+  id: string;
+  name: string;
+  kind: string;
+  config: { host: string; port: number; database: string; user: string; sslmode: string };
+  created_at: string;
+}
+
+export interface SourceTable {
+  schema: string;
+  table: string;
+  type: string;
+  estimated_rows: number;
+}
+
+export interface InsightFeedItem extends Insight {
+  run_goal: string;
+  run_intent: string | null;
+  created_at: string;
 }

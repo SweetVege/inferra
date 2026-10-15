@@ -2,6 +2,7 @@
 
 import { DataTable } from "@/components/data-table";
 import { AbTestView, BaselineView, BayesianView, PowerView, SegmentView, SequentialView, SrmView } from "@/components/experiment-views";
+import { AnomalyView, DecompositionView, MetricView } from "@/components/metric-views";
 import { DidView, ForecastView, ModelView, PsmView, RegressionView } from "@/components/modeling-views";
 import { Findings } from "@/components/profile-view";
 import { CodeBlock } from "@/components/ui";
@@ -47,6 +48,9 @@ export function ArtifactView({ artifact }: { artifact: Artifact }) {
   if (artifact.kind === "bayesian") return <BayesianView d={d} />;
   if (artifact.kind === "sequential") return <SequentialView d={d} />;
   if (artifact.kind === "baseline") return <BaselineView d={d} />;
+  if (artifact.kind === "metric") return <MetricView d={d} />;
+  if (artifact.kind === "anomalies") return <AnomalyView d={d} />;
+  if (artifact.kind === "decomposition") return <DecompositionView d={d} />;
   if (artifact.kind === "regression") return <RegressionView d={d} />;
   if (artifact.kind === "did") return <DidView d={d} />;
   if (artifact.kind === "psm") return <PsmView d={d} />;

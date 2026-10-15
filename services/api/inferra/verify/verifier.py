@@ -177,6 +177,10 @@ def verify_insight(
     false_thresholds = [f"p < {t:g}" for t in thresholds if not any(p < t for p in cited_p)]
     prose = CONVENTIONS.sub(" ", prose)
     context_numbers = [t[1] for t in _number_tokens(context_text)]
+    # Labels inside cited results (version "5.2", date "2026-09-21", segment "Q3") may be repeated.
+    for artifact_id in {ev["artifact_id"] for ev in verdict.resolved_evidence}:
+        for label in _labels(artifacts[artifact_id]["data"]):
+            context_numbers += [t[1] for t in _number_tokens(label)]
     for ev in verdict.resolved_evidence:
         if isinstance(ev["value"], str):
             context_numbers += [t[1] for t in _number_tokens(ev["value"])]
@@ -355,6 +359,22 @@ def _interval_matches(key: str, other: str, needs: str) -> bool:
     if key in {"relative_effect", "odds_ratio"}:
         return other.startswith(f"{key}_ci_")
     return other.startswith("ci_") or "_ci_" in other
+
+
+LABEL_EXCLUDED_KEYS = {"sql", "notes", "method", "model", "algorithm", "description", "detail", "reason"}
+
+
+def _labels(data: Any, key: str = "") -> list[str]:
+    """String values in an artifact (category labels, dates), skipping free text such as SQL."""
+    if key in LABEL_EXCLUDED_KEYS:
+        return []
+    if isinstance(data, str):
+        return [data] if len(data) <= 60 else []
+    if isinstance(data, dict):
+        return [s for k, v in data.items() for s in _labels(v, str(k))]
+    if isinstance(data, list):
+        return [s for v in data for s in _labels(v, key)]
+    return []
 
 
 def _parts(path: str) -> list[str]:
