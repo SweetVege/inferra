@@ -22,7 +22,22 @@ from inferra.runtime import executor
 from inferra.runtime.recorder import Recorder
 from inferra.tools.profiling import profile_table
 
-DEMO_GOAL = "Give me an overview of our e-commerce orders: what stands out, and can we trust the data?"
+DEMO_RUNS = [
+    {
+        "file": "ecommerce_orders.csv",
+        "description": "Six months of online orders with region, channel, discount, amount, returns, "
+        "and customer ratings.",
+        "goal": "Give me an overview of our e-commerce orders: what stands out, and can we trust the data?",
+        "accept": 2,
+    },
+    {
+        "file": "checkout_experiment.csv",
+        "description": "A three-week randomized test of a redesigned checkout: one row per user with "
+        "variant, device, country, pre-period orders and spend, conversion, revenue, and checkout latency.",
+        "goal": "Did the new checkout test win? Check conversion, and make sure latency did not get worse.",
+        "accept": 1,
+    },
+]
 
 
 def samples_dir() -> Path:
@@ -49,40 +64,39 @@ def seed_demo(reset: bool = False) -> str:
         db.add(ws)
         db.flush()
         user = demo_user(db)
-        dataset = ingest_file(
-            db,
-            ws.id,
-            samples_dir() / "ecommerce_orders.csv",
-            "ecommerce_orders.csv",
-            None,
-            description="Six months of online orders with region, channel, discount, amount, "
-            "returns, and customer ratings.",
-        )
-        dataset.profile = profile_table(datasource_for(db, ws.id, [dataset.id]), dataset.table_name)
-        run = Run(workspace_id=ws.id, created_by=user.id, goal=DEMO_GOAL, dataset_ids=[dataset.id])
-        db.add(run)
+        run_ids = []
+        for spec in DEMO_RUNS:
+            dataset = ingest_file(
+                db, ws.id, samples_dir() / spec["file"], spec["file"], None, description=spec["description"]
+            )
+            dataset.profile = profile_table(datasource_for(db, ws.id, [dataset.id]), dataset.table_name)
+            run = Run(workspace_id=ws.id, created_by=user.id, goal=spec["goal"], dataset_ids=[dataset.id])
+            db.add(run)
+            db.flush()
+            run_ids.append((run.id, spec["accept"]))
         db.commit()
-        workspace_id, run_id = ws.id, run.id
+        workspace_id = ws.id
 
     llm = ScriptedLLM(demo_script)
     set_llm_factory(lambda: llm)
     try:
-        with session_scope() as db:
-            run = db.get(Run, run_id)
-            assert run is not None
-            Recorder(db, run).event("created", "Goal received")
-            executor.plan_run(db, {"run_id": run_id})
-            run.status = "running"
-            Recorder(db, run).event("approved", "Plan approved by demo")
-            db.commit()
-            executor.execute_run(db, {"run_id": run_id})
-            insights = db.scalars(
-                select(Insight).where(Insight.run_id == run_id).order_by(Insight.position)
-            ).all()
-            for insight in insights[:2]:
-                insight.status = "accepted"
-                insight.reviewed_at = datetime.now(UTC)
-            db.commit()
+        for run_id, accept in run_ids:
+            with session_scope() as db:
+                run = db.get(Run, run_id)
+                assert run is not None
+                Recorder(db, run).event("created", "Goal received")
+                executor.plan_run(db, {"run_id": run_id})
+                run.status = "running"
+                Recorder(db, run).event("approved", "Plan approved by demo")
+                db.commit()
+                executor.execute_run(db, {"run_id": run_id})
+                insights = db.scalars(
+                    select(Insight).where(Insight.run_id == run_id).order_by(Insight.position)
+                ).all()
+                for insight in insights[:accept]:
+                    insight.status = "accepted"
+                    insight.reviewed_at = datetime.now(UTC)
+                db.commit()
     finally:
         set_llm_factory(None)
     return workspace_id

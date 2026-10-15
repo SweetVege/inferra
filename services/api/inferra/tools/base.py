@@ -3,10 +3,12 @@
 A tool is a Pydantic input model plus a function. The model's JSON schema is what the LLM sees,
 and the same model validates whatever the LLM sends back."""
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
 from pydantic import BaseModel, ValidationError
 
 from inferra.datasources.base import DataSource
@@ -83,12 +85,16 @@ def get_tools(names: list[str]) -> list[Tool]:
 
 def _load_all() -> None:
     # Importing the modules registers their tools.
-    from inferra.tools import analysis, profiling  # noqa: F401
+    from inferra.tools import analysis, experiment, profiling  # noqa: F401
 
 
-def round_floats(value: Any, digits: int = 6) -> Any:
+def round_floats(value: Any, digits: int = 8) -> Any:
+    """Round to significant digits, so tiny p-values keep their magnitude. Also turns numpy
+    scalars into plain Python values so artifacts serialize as JSON."""
+    if isinstance(value, np.generic):
+        value = value.item()
     if isinstance(value, float):
-        return round(value, digits)
+        return float(f"{value:.{digits}g}") if math.isfinite(value) else value
     if isinstance(value, list):
         return [round_floats(v, digits) for v in value]
     if isinstance(value, dict):

@@ -174,6 +174,28 @@ function ClarificationPanel({ run, editable, onAnswer }: { run: RunDetail; edita
   );
 }
 
+const FEATURED = new Set(["cuped", "ab_test", "power"]);
+
+function ResultCard({ artifact, defaultOpen }: { artifact: Artifact; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Card>
+      <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 px-4 py-3 text-left" aria-expanded={open}>
+        <ChevronRight className={cx("size-4 shrink-0 text-ink-3 transition-transform", open && "rotate-90")} aria-hidden />
+        <span className="truncate text-sm font-medium">{artifact.title}</span>
+        <span className="ml-auto shrink-0">
+          <Badge>{titleCase(artifact.kind)}</Badge>
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-line px-4 py-4">
+          <ArtifactView artifact={artifact} />
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function ArtifactModal({ artifact, onClose }: { artifact: Artifact; onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -287,6 +309,17 @@ export default function RunPage() {
           <div className="space-y-3">
             {run.insights.map((i) => (
               <InsightCard key={i.id} insight={i} workspaceId={ws} artifacts={run.artifacts} editable={editable} onChange={updateInsight} onShowArtifact={setShown} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {run.artifacts.length > 0 && (
+        <section>
+          <SectionTitle>Results</SectionTitle>
+          <div className="space-y-2">
+            {run.artifacts.map((a, i) => (
+              <ResultCard key={a.id} artifact={a} defaultOpen={i < 3 && FEATURED.has(a.kind)} />
             ))}
           </div>
         </section>

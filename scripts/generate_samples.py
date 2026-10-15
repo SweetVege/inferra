@@ -40,6 +40,39 @@ def ecommerce_orders(rows: int = 2400) -> None:
         writer.writerows(out)
 
 
+def checkout_experiment(users: int = 24000) -> None:
+    """A randomized checkout redesign test with a pre-period covariate, segments, and guardrails."""
+    rng = random.Random(7)
+    start = date(2026, 8, 3)
+    devices = [("desktop", 0.42), ("mobile", 0.48), ("tablet", 0.10)]
+    countries = [("US", 0.5), ("UK", 0.2), ("DE", 0.15), ("FR", 0.15)]
+    out = []
+    for i in range(1, users + 1):
+        variant = "treatment" if rng.random() < 0.5 else "control"
+        device = rng.choices([d for d, _ in devices], [w for _, w in devices])[0]
+        country = rng.choices([c for c, _ in countries], [w for _, w in countries])[0]
+        engagement = rng.lognormvariate(0, 0.9)
+        pre_orders = max(0, min(20, round(rng.gauss(2.5 * engagement, 0.7))))
+        pre_spend = round(sum(rng.lognormvariate(3.6, 0.5) for _ in range(pre_orders)), 2)
+        base = 0.02 + 0.07 * min(engagement, 3.5) + (0.02 if device == "desktop" else 0)
+        # The redesign helps on mobile, barely on desktop, and slightly slows page loads.
+        lift = {"mobile": 1.16, "desktop": 1.03, "tablet": 1.08}[device] if variant == "treatment" else 1.0
+        converted = rng.random() < min(0.95, base * lift)
+        revenue = round(rng.lognormvariate(3.9, 0.5) * (0.7 + 0.25 * min(engagement, 4)), 2) if converted else 0.0
+        latency = round(rng.gauss(820 if variant == "treatment" else 790, 140))
+        out.append({
+            "user_id": f"U{i:06d}", "assigned_on": (start + timedelta(days=rng.randrange(0, 21))).isoformat(),
+            "variant": variant, "device": device, "country": country, "pre_orders": pre_orders,
+            "pre_spend": pre_spend, "converted": int(converted), "revenue": revenue,
+            "checkout_latency_ms": max(200, latency),
+        })
+    with (OUT / "checkout_experiment.csv").open("w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(out[0]))
+        writer.writeheader()
+        writer.writerows(out)
+
+
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
     ecommerce_orders()
+    checkout_experiment()

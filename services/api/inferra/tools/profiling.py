@@ -83,7 +83,8 @@ def column_stats(
               FROM {t}""",
         )
         stats.update(num)
-        if num["p25"] is not None and num["p75"] is not None:
+        # IQR outliers are meaningless when the quartiles coincide (e.g. 0/1 flags, mostly-zero columns).
+        if num["p25"] is not None and num["p75"] is not None and num["p75"] > num["p25"]:
             iqr = num["p75"] - num["p25"]
             lo, hi = num["p25"] - 1.5 * iqr, num["p75"] + 1.5 * iqr
             out = _one(

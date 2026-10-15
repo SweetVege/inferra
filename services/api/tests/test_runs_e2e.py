@@ -251,3 +251,135 @@ def test_dataset_profile_endpoint(client: TestClient, orders_csv: Path) -> None:
     assert detail["profile"]["row_count"] == 2412 and detail["has_profile"]
     assert client.delete(f"/api/workspaces/{ws}/datasets/{dataset['id']}").status_code == 204
     assert client.get(f"/api/workspaces/{ws}/datasets").json() == []
+
+
+EXPERIMENT_CSV = Path(__file__).resolve().parents[3] / "samples" / "checkout_experiment.csv"
+
+
+def test_experiment_analysis_end_to_end(client: TestClient) -> None:
+    ws = login(client)
+    upload(client, ws, EXPERIMENT_CSV)
+    use_llm(demo_script)
+    client.patch(f"/api/workspaces/{ws}", json={"auto_approve_plans": True})
+    run = client.post(
+        f"/api/workspaces/{ws}/runs", json={"goal": "Did the new checkout test win without hurting latency?"}
+    ).json()
+    drain()
+    run = client.get(f"/api/workspaces/{ws}/runs/{run['id']}").json()
+    assert run["status"] == "completed", run["error"]
+    assert run["intent"] == "experiment_analysis"
+    assert [s["agent"] for s in run["steps"]] == ["data", "experiment", "insight"]
+    kinds = {a["kind"] for a in run["artifacts"]}
+    assert {"srm", "ab_test", "cuped", "segment_effects", "bayesian", "sequential"} <= kinds
+    assert len(run["insights"]) == 4
+    assert all(i["verified"] for i in run["insights"]), [
+        [c for c in i["checks"] if not c["passed"]] for i in run["insights"]
+    ]
+    names = {c["name"] for c in run["insights"][0]["checks"]}
+    assert {"interval_reported", "multiple_comparisons", "sample_ratio"} <= names
+
+
+def test_experiment_design_end_to_end(client: TestClient) -> None:
+    ws = login(client)
+    dataset = upload(client, ws, EXPERIMENT_CSV)
+
+    def script(req: Request) -> list[Any]:
+        if req.role == "planning":
+            return [
+                ToolUseBlock(
+                    "submit_plan",
+                    {
+                        "intent": "experiment_design",
+                        "dataset_ids": [dataset["id"]],
+                        "params": [
+                            {"name": "metric", "value": "converted"},
+                            {"name": "mde", "value": "5% relative"},
+                            {"name": "date_column", "value": "assigned_on"},
+                        ],
+                        "rationale": "Sizing a test.",
+                        "confidence": "high",
+                    },
+                )
+            ]
+        if "power_analysis" in req.tool_names:
+            from inferra.llm.demo_script import _results
+
+            results = _results(req)
+            if not results:
+                return [
+                    ToolUseBlock(
+                        "metric_baseline",
+                        {
+                            "table": "checkout_experiment",
+                            "metric_column": "converted",
+                            "date_column": "assigned_on",
+                        },
+                    )
+                ]
+            if len(results) == 1:
+                b = results[0]["result"]
+                return [
+                    ToolUseBlock(
+                        "power_analysis",
+                        {
+                            "metric_type": "binary",
+                            "baseline_mean": b["mean"],
+                            "mde": 0.05,
+                            "daily_units": b["daily_units"],
+                        },
+                    )
+                ]
+            return [ToolUseBlock("finish_step", {"summary": "Sized the test."})]
+        if req.role == "insight":
+            from inferra.llm.demo_script import _artifacts
+
+            power = _artifacts(req)["Sample size and duration"]
+            d = power["data"]
+            return [
+                ToolUseBlock(
+                    "submit_insights",
+                    {
+                        "insights": [
+                            {
+                                "title": "Plan for a long test",
+                                "claim": f"Detecting a 5% relative lift needs {d['sample_size_per_variant']:,} users "
+                                "per variant, "
+                                f"about {d['estimated_days']} days at current traffic.",
+                                "evidence": [
+                                    {
+                                        "artifact_id": power["id"],
+                                        "path": "mde_relative",
+                                        "value": d["mde_relative"],
+                                    },
+                                    {
+                                        "artifact_id": power["id"],
+                                        "path": "sample_size_per_variant",
+                                        "value": d["sample_size_per_variant"],
+                                    },
+                                    {
+                                        "artifact_id": power["id"],
+                                        "path": "estimated_days",
+                                        "value": d["estimated_days"],
+                                    },
+                                ],
+                                "method": "Two-sided z-test power analysis at alpha 0.05 and 80% power.",
+                                "caveats": [],
+                                "recommended_action": "Consider a larger MDE.",
+                                "confidence": "high",
+                            }
+                        ]
+                    },
+                )
+            ]
+        return demo_script(req)
+
+    use_llm(script)
+    client.patch(f"/api/workspaces/{ws}", json={"auto_approve_plans": True})
+    run = client.post(f"/api/workspaces/{ws}/runs", json={"goal": "How long to detect a 5% lift?"}).json()
+    drain()
+    run = client.get(f"/api/workspaces/{ws}/runs/{run['id']}").json()
+    assert run["status"] == "completed", run["error"]
+    assert [s["agent"] for s in run["steps"]] == ["data", "experiment", "insight"]
+    assert {t["tool"] for t in run["tool_calls"]} >= {"metric_baseline", "power_analysis"}
+    insight = run["insights"][0]
+    assert insight["verified"], insight["checks"]

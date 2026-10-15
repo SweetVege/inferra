@@ -138,3 +138,142 @@ def test_high_confidence_needs_enough_observations() -> None:
         ARTIFACTS,
     )
     assert not check(v, "sample_size").passed
+
+
+EXPERIMENTS = {
+    "ab": {
+        "kind": "ab_test",
+        "data": {
+            "design": "randomized",
+            "srm_ok": True,
+            "comparisons": [
+                {
+                    "relative_lift": 0.1045,
+                    "relative_lift_ci_low": 0.034,
+                    "relative_lift_ci_high": 0.175,
+                    "p_value": 0.0042,
+                    "n_treatment": 12036,
+                }
+            ],
+        },
+    },
+    "seg": {
+        "kind": "segment_effects",
+        "data": {
+            "design": "randomized",
+            "segments": [
+                {
+                    "relative_lift": 0.154,
+                    "relative_lift_ci_low": 0.05,
+                    "relative_lift_ci_high": 0.26,
+                    "p_value": 0.004,
+                    "p_value_adjusted": 0.012,
+                }
+            ],
+        },
+    },
+    "broken": {
+        "kind": "ab_test",
+        "data": {
+            "design": "randomized_srm_failed",
+            "srm_ok": False,
+            "comparisons": [
+                {
+                    "relative_lift": 0.08,
+                    "relative_lift_ci_low": 0.01,
+                    "relative_lift_ci_high": 0.15,
+                    "p_value": 0.02,
+                }
+            ],
+        },
+    },
+}
+
+
+def ev(artifact: str, path: str) -> dict:  # type: ignore[type-arg]
+    return {"artifact_id": artifact, "path": path, "value": resolve_path(EXPERIMENTS[artifact]["data"], path)}
+
+
+def test_experiment_insight_with_interval_passes_and_may_use_causal_wording() -> None:
+    v = verify_insight(
+        draft(
+            "The new checkout increased conversion by 10.4% (95% CI 3.4% to 17.5%, p = 0.004).",
+            [
+                ev("ab", "comparisons.0.relative_lift"),
+                ev("ab", "comparisons.0.relative_lift_ci_low"),
+                ev("ab", "comparisons.0.relative_lift_ci_high"),
+                ev("ab", "comparisons.0.p_value"),
+            ],
+            confidence="high",
+        ),
+        EXPERIMENTS,
+    )
+    assert v.verified, v.failures()
+
+
+def test_p_value_without_interval_fails() -> None:
+    v = verify_insight(
+        draft(
+            "Conversion improved by 10.4% (p = 0.004).",
+            [ev("ab", "comparisons.0.relative_lift"), ev("ab", "comparisons.0.p_value")],
+        ),
+        EXPERIMENTS,
+    )
+    assert not check(v, "interval_reported").passed
+
+
+def test_segment_results_need_adjusted_p_values() -> None:
+    evidence = [
+        ev("seg", "segments.0.relative_lift"),
+        ev("seg", "segments.0.relative_lift_ci_low"),
+        ev("seg", "segments.0.relative_lift_ci_high"),
+    ]
+    raw = verify_insight(
+        draft(
+            "Mobile lift is 15.4% (95% CI 5.0% to 26.0%, p = 0.004).",
+            [*evidence, ev("seg", "segments.0.p_value")],
+        ),
+        EXPERIMENTS,
+    )
+    assert not check(raw, "multiple_comparisons").passed
+    adjusted = verify_insight(
+        draft(
+            "Mobile lift is 15.4% (95% CI 5.0% to 26.0%, adjusted p = 0.012).",
+            [*evidence, ev("seg", "segments.0.p_value_adjusted")],
+        ),
+        EXPERIMENTS,
+    )
+    assert adjusted.verified, adjusted.failures()
+
+
+def test_failed_sample_ratio_must_be_disclosed() -> None:
+    evidence = [
+        ev("broken", "comparisons.0.relative_lift"),
+        ev("broken", "comparisons.0.relative_lift_ci_low"),
+        ev("broken", "comparisons.0.relative_lift_ci_high"),
+    ]
+    hidden = verify_insight(draft("Treatment is 8.0% better (95% CI 1.0% to 15.0%).", evidence), EXPERIMENTS)
+    assert not check(hidden, "sample_ratio").passed
+    disclosed = verify_insight(
+        draft(
+            "The measured difference of 8.0% (95% CI 1.0% to 15.0%) cannot be trusted.",
+            evidence,
+            confidence="low",
+            caveats=["Assignment counts fail the sample ratio check."],
+        ),
+        EXPERIMENTS,
+    )
+    assert check(disclosed, "sample_ratio").passed
+
+
+def test_p_value_thresholds_must_be_true() -> None:
+    evidence = [
+        ev("ab", "comparisons.0.relative_lift"),
+        ev("ab", "comparisons.0.relative_lift_ci_low"),
+        ev("ab", "comparisons.0.relative_lift_ci_high"),
+        ev("ab", "comparisons.0.p_value"),
+    ]
+    honest = verify_insight(draft("Lift 10.4% (95% CI 3.4% to 17.5%, p < 0.01).", evidence), EXPERIMENTS)
+    assert honest.verified, honest.failures()
+    overstated = verify_insight(draft("Lift 10.4% (95% CI 3.4% to 17.5%, p < 0.001).", evidence), EXPERIMENTS)
+    assert "p < 0.001" in check(overstated, "number_grounding").detail

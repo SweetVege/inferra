@@ -165,9 +165,15 @@ Insight = { claim,                // one sentence
 
 The **Verifier** is deterministic code that runs on every draft:
 
-1. **Number grounding.** Every number in the claim and narrative must match a value in a cited artifact (within rounding tolerance). Unmatched numbers fail.
-2. **Statistical hygiene.** Minimum sample sizes; reported effect size and interval, not just a p-value; multiple-comparison correction when several segments or metrics are tested; an SRM pass before any experiment conclusion.
-3. **Language rules.** Causal wording ("caused", "drove", "increased because") is allowed only for randomized experiments or explicit causal methods; otherwise the Insight Agent must use associational language and add a caveat.
+1. **Evidence.** Every citation must resolve to a value in an artifact, and the quoted value must match it.
+2. **Number grounding.** Every number in the title, claim, caveats, and action must match a cited value at the precision shown (fractions may be written as percentages). Statistical conventions such as "95% CI" are exempt, but a stated threshold like "p < 0.001" must be true of a cited p-value.
+3. **Causal language.** Causal wording ("caused", "drove", "led to") is allowed only when a cited artifact comes from a randomized design (with a passing sample ratio check) or an explicit causal method. Caveats may discuss causation freely.
+4. **Sample size.** Fewer than 30 observations cannot support a high-confidence claim.
+5. **Intervals.** A cited p-value needs the matching confidence interval from the same result.
+6. **Multiple comparisons.** Segment results must cite Holm-adjusted p-values.
+7. **Sample ratio.** An experiment that failed its SRM check can only appear as a low-confidence insight that discloses the broken assignment.
+
+The verifier checks that numbers are grounded and that the wording matches the strength of the evidence; it cannot judge whether the reasoning connecting them is right. That is what human review is for.
 
 Failures go back to the Insight Agent with reasons (at most 2 revisions). Insights that still fail are shown to the reviewer flagged as **Unverified**, never silently dropped.
 
@@ -230,10 +236,10 @@ inferra/
 │  ├─ inferra/
 │  │  ├─ api/                 # FastAPI routes and response schemas
 │  │  ├─ auth/                # GitHub OAuth, signed-cookie sessions, workspace roles
-│  │  ├─ agents/              # orchestrator.py, specialist.py (Data, Analyst), insight.py, prompts.py
+│  │  ├─ agents/              # orchestrator.py, specialist.py (Data, Analyst, Experiment), insight.py, prompts.py
 │  │  ├─ workflows/           # intent templates
 │  │  ├─ runtime/             # job queue, run executor, recorder (tool calls, artifacts, events)
-│  │  ├─ tools/               # typed tools: profiling, SQL, aggregation, correlations
+│  │  ├─ tools/               # typed tools: profiling, SQL, aggregation, correlations, experiments
 │  │  ├─ verify/              # deterministic insight verifier
 │  │  ├─ datasources/         # DataSource protocol, sandboxed DuckDB file source
 │  │  ├─ llm/                 # Claude gateway, scripted client, demo script
