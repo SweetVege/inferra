@@ -11,6 +11,7 @@ import {
   Loader2,
   type LucideIcon,
   MinusCircle,
+  Network,
   Sparkles,
   Brain,
   XCircle,
@@ -121,6 +122,7 @@ export const AGENTS: Record<string, { title: string; icon: LucideIcon; role: str
   analyst: { title: "Analyst Agent", icon: BarChart3, role: "Computes and compares" },
   experiment: { title: "Experiment Agent", icon: FlaskConical, role: "Designs and reads A/B tests" },
   ml: { title: "ML Agent", icon: Brain, role: "Builds predictive models" },
+  modeler: { title: "Data Modeler", icon: Network, role: "Designs and tests data models" },
   insight: { title: "Insight Agent", icon: Sparkles, role: "Writes verified insights" },
 };
 

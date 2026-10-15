@@ -40,11 +40,22 @@ class ModelDraft:
 
 
 @dataclass
+class ProjectDraft:
+    """A data model built in a run: saved as a draft for people to review, edit, and publish."""
+
+    name: str
+    description: str
+    nodes: list[dict[str, Any]]
+    build: dict[str, Any]
+
+
+@dataclass
 class ToolOutput:
     result: Any  # compact JSON-able payload the agent reads
     artifact: ArtifactDraft | None = None
     code: str | None = None  # SQL (or equivalent) that produced the result
     model: ModelDraft | None = None
+    project: ProjectDraft | None = None
 
 
 @dataclass
@@ -101,7 +112,15 @@ def get_tools(names: list[str]) -> list[Tool]:
 
 def _load_all() -> None:
     # Importing the modules registers their tools.
-    from inferra.tools import analysis, experiment, metrics, ml, modeling, profiling  # noqa: F401
+    from inferra.tools import (  # noqa: F401
+        analysis,
+        datamodel,
+        experiment,
+        metrics,
+        ml,
+        modeling,
+        profiling,
+    )
 
 
 def round_floats(value: Any, digits: int = 8) -> Any:

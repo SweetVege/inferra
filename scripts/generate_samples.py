@@ -178,6 +178,74 @@ def daily_funnel() -> None:
     _write("daily_funnel.csv", out)
 
 
+def retail_order_lines() -> None:
+    """A denormalized order-line export, the classic input for a star schema. Customer and product
+    attributes repeat on every line. Planted issues: 4 customers moved region mid-period (so their
+    region is not stable), and some orders are guest checkouts with no customer at all."""
+    rng = random.Random(23)
+    first = ["Ava", "Liam", "Mia", "Noah", "Zoe", "Ethan", "Ivy", "Lucas", "Ella", "Owen", "Nora", "Leo"]
+    last = ["Chen", "Patel", "Garcia", "Kim", "Novak", "Silva", "Okafor", "Muller", "Rossi", "Haddad"]
+    segments = [("consumer", 0.70), ("small_business", 0.22), ("enterprise", 0.08)]
+    regions = ["North", "South", "East", "West"]
+    customers = []
+    for i in range(1, 501):
+        customers.append({
+            "customer_id": f"C{i:04d}",
+            "customer_name": f"{rng.choice(first)} {rng.choice(last)}",
+            "customer_segment": rng.choices([s for s, _ in segments], [w for _, w in segments])[0],
+            "customer_region": rng.choice(regions),
+            "customer_signup_date": (date(2024, 1, 1) + timedelta(days=rng.randrange(0, 720))).isoformat(),
+        })
+    movers = {c["customer_id"]: rng.choice([r for r in regions if r != c["customer_region"]])
+              for c in rng.sample(customers, 4)}
+    categories = {
+        "Electronics": (["Headphones", "Charger", "Speaker", "Keyboard", "Webcam"], 4.1),
+        "Home": (["Lamp", "Kettle", "Throw", "Planter", "Clock"], 3.5),
+        "Apparel": (["Jacket", "Sneakers", "Hoodie", "Scarf", "Cap"], 3.6),
+        "Beauty": (["Serum", "Cleanser", "Balm", "Mask", "Toner"], 2.9),
+        "Sports": (["Yoga Mat", "Bottle", "Dumbbells", "Band Set", "Backpack"], 3.4),
+    }
+    brands = ["Northwind", "Acme", "Bluebird", "Kestrel", "Lumen", "Orbit"]
+    adjectives = ["Classic", "Pro", "Lite", "Everyday", "Studio", "Trail"]
+    products = []
+    for n, (category, (nouns, price_mu)) in enumerate(categories.items()):
+        for k in range(12):
+            products.append({
+                "product_sku": f"SKU-{1001 + n * 12 + k}",
+                "product_name": f"{adjectives[k % 6]} {nouns[k % 5]}",
+                "product_category": category,
+                "product_brand": rng.choice(brands),
+                "list_price": round(rng.lognormvariate(price_mu, 0.4), 2),
+            })
+    statuses = [("completed", 0.90), ("returned", 0.07), ("cancelled", 0.03)]
+    channels = [("web", 0.5), ("app", 0.35), ("store", 0.15)]
+    start, out = date(2026, 1, 1), []
+    for o in range(1, 3001):
+        day = start + timedelta(days=rng.randrange(0, 181))
+        guest = rng.random() < 0.012
+        customer = None if guest else rng.choice(customers)
+        status = rng.choices([s for s, _ in statuses], [w for _, w in statuses])[0]
+        channel = rng.choices([c for c, _ in channels], [w for _, w in channels])[0]
+        for line in range(1, max(1, min(5, round(rng.gauss(2.1, 1.0)))) + 1):
+            product = rng.choice(products)
+            quantity = rng.choices([1, 2, 3], [0.7, 0.22, 0.08])[0]
+            discount = rng.choice([0, 0, 0, 0.1, 0.15, 0.25])
+            unit_price = round(product["list_price"] * (1 - discount), 2)
+            row = {"order_id": f"SO{o:05d}", "line_number": line, "order_date": day.isoformat(),
+                   "order_status": status, "channel": channel}
+            if customer is None:
+                row |= {k: "" for k in customers[0]}
+            else:
+                row |= customer
+                if customer["customer_id"] in movers and day >= date(2026, 4, 1):
+                    row["customer_region"] = movers[customer["customer_id"]]
+            row |= {k: v for k, v in product.items() if k != "list_price"}
+            row |= {"unit_list_price": product["list_price"], "quantity": quantity, "discount_pct": discount,
+                    "unit_price": unit_price, "line_amount": round(unit_price * quantity, 2)}
+            out.append(row)
+    _write("retail_order_lines.csv", out)
+
+
 def _write(name: str, rows: list[dict]) -> None:
     with (OUT / name).open("w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
@@ -193,3 +261,4 @@ if __name__ == "__main__":
     loyalty_program()
     daily_sales()
     daily_funnel()
+    retail_order_lines()

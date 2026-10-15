@@ -1,6 +1,6 @@
 "use client";
 
-import { Brain, Database, Gauge, History, Lightbulb, LogOut, Moon, Sparkles, Sun } from "lucide-react";
+import { Brain, Database, Gauge, History, Lightbulb, LogOut, Moon, Network, Sparkles, Sun } from "lucide-react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -58,7 +58,8 @@ function Shell({ children }: { children: ReactNode }) {
     { href: `${base}/insights`, label: "Insights", icon: Lightbulb, active: pathname.startsWith(`${base}/insights`) },
     { href: `${base}/metrics`, label: "Metrics", icon: Gauge, active: pathname.startsWith(`${base}/metrics`) },
     { href: `${base}/datasets`, label: "Datasets", icon: Database, active: pathname.startsWith(`${base}/datasets`) },
-    { href: `${base}/models`, label: "Models", icon: Brain, active: pathname.startsWith(`${base}/models`) },
+    { href: `${base}/data-models`, label: "Data models", icon: Network, active: pathname.startsWith(`${base}/data-models`) },
+    { href: `${base}/models`, label: "ML models", icon: Brain, active: pathname.startsWith(`${base}/models`) },
   ];
 
   return (

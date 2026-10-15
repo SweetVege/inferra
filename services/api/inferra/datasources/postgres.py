@@ -4,39 +4,30 @@ Every session is read-only (`default_transaction_read_only`) with a statement ti
 runs as a subquery on a server-side cursor, which accepts exactly one SELECT. Extracts land in the
 workspace's storage, so every analysis tool works on them exactly as on uploaded files."""
 
-import base64
-import decimal
-import hashlib
 import ipaddress
 import socket
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-import duckdb
-import pandas as pd
-from cryptography.fernet import Fernet, InvalidToken
+from pydantic import BaseModel, Field
 
 from inferra.config import get_settings
 from inferra.datasources.base import QueryError
+from inferra.datasources.extracts import Columns, fetch_batches, frames_to_parquet, wrap_select
 
-BATCH = 50_000
-
-
-def _fernet() -> Fernet:
-    digest = hashlib.sha256((get_settings().secret_key + ":connections").encode()).digest()
-    return Fernet(base64.urlsafe_b64encode(digest))
+TITLE = "PostgreSQL"
 
 
-def encrypt(secret: str) -> str:
-    return _fernet().encrypt(secret.encode()).decode()
-
-
-def decrypt(token: str) -> str:
-    try:
-        return _fernet().decrypt(token.encode()).decode()
-    except InvalidToken as exc:
-        raise QueryError("Stored credentials can no longer be decrypted; re-enter the password.") from exc
+class PostgresIn(BaseModel):
+    kind: Literal["postgres"] = "postgres"
+    name: str = Field(min_length=1, max_length=200)
+    host: str = Field(min_length=1, max_length=255)
+    port: int = Field(default=5432, ge=1, le=65535)
+    database: str = Field(min_length=1, max_length=200)
+    user: str = Field(min_length=1, max_length=200)
+    password: str = Field(max_length=500)
+    sslmode: Literal["disable", "prefer", "require", "verify-ca", "verify-full"] = "prefer"
 
 
 @dataclass
@@ -114,14 +105,23 @@ def server_version(config: PgConfig, password: str) -> str:
         return str(conn.execute("SHOW server_version").fetchone()[0])  # type: ignore[index]
 
 
+def parse(body: PostgresIn) -> tuple[dict[str, Any], str]:
+    return PgConfig(body.host, body.port, body.database, body.user, body.sslmode).__dict__, body.password
+
+
+def verify(config: dict[str, Any], secret: str) -> str:
+    return f"PostgreSQL {server_version(PgConfig.from_dict(config), secret)}"
+
+
+def tables(config: dict[str, Any], secret: str) -> list[dict[str, Any]]:
+    return list_tables(PgConfig.from_dict(config), secret)
+
+
 def source_sql(schema: str | None, table: str | None, sql: str | None) -> Any:
     from psycopg import sql as pgsql
 
     if sql:
-        body = sql.strip().rstrip(";")
-        if not body.lower().startswith(("select", "with")):
-            raise QueryError("Custom extracts must be a single SELECT query.")
-        return pgsql.SQL("SELECT * FROM ({}) AS inferra_extract").format(pgsql.SQL(body))  # type: ignore[arg-type]
+        return pgsql.SQL(wrap_select(sql))  # type: ignore[arg-type]
     if not table:
         raise QueryError("Choose a table or provide a query.")
     return pgsql.SQL("SELECT * FROM {}.{}").format(
@@ -130,46 +130,18 @@ def source_sql(schema: str | None, table: str | None, sql: str | None) -> Any:
 
 
 def extract(
-    config: PgConfig, password: str, query: Any, dest: Path, max_rows: int
-) -> tuple[int, list[dict[str, str]], bool]:
-    """Stream a query into a Parquet file. Returns (rows, columns, truncated)."""
+    config: dict[str, Any], secret: str, source: dict[str, Any], dest: Path, max_rows: int
+) -> tuple[int, Columns, bool]:
+    """Stream a table or query through a server-side cursor into Parquet. Returns (rows, columns,
+    truncated). A named cursor accepts exactly one statement, and the session is read-only."""
     import psycopg
 
-    frames: list[pd.DataFrame] = []
-    fetched = 0
-    truncated = False
+    query = source_sql(source.get("schema"), source.get("table"), source.get("sql"))
     try:
-        with connect(config, password) as conn, conn.cursor(name="inferra_extract") as cur:
+        with connect(PgConfig.from_dict(config), secret) as conn, conn.cursor(name="inferra_extract") as cur:
             cur.execute(query)
-            names: list[str] | None = None
-            while True:
-                rows = cur.fetchmany(BATCH)
-                if names is None and cur.description:
-                    names = [d.name for d in cur.description]
-                if not rows:
-                    break
-                if fetched + len(rows) > max_rows:
-                    rows = rows[: max_rows - fetched]
-                    truncated = True
-                frames.append(pd.DataFrame.from_records(rows, columns=names))
-                fetched += len(rows)
-                if truncated:
-                    break
+            frames, truncated = fetch_batches(cur, max_rows)
     except psycopg.Error as exc:
         raise QueryError(str(exc).strip().splitlines()[0]) from exc
-    if not frames:
-        raise QueryError("The query returned no rows.")
-    frame = pd.concat(frames, ignore_index=True)
-    for col in frame.columns:
-        if frame[col].map(lambda v: isinstance(v, decimal.Decimal)).any():
-            frame[col] = pd.to_numeric(frame[col], errors="coerce").astype(float)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect()
-    try:
-        con.register("extract", frame)
-        path = str(dest).replace("'", "''")
-        con.execute(f"COPY (SELECT * FROM extract) TO '{path}' (FORMAT parquet)")
-        described = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{path}')").fetchall()
-    finally:
-        con.close()
-    return len(frame), [{"name": r[0], "type": r[1]} for r in described], truncated
+    rows, columns = frames_to_parquet(frames, dest)
+    return rows, columns, truncated

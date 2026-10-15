@@ -42,6 +42,13 @@ def _catalog(req: Request) -> list[dict[str, Any]]:
 
 MODELING_ROUTES: list[tuple[re.Pattern[str], str, str, str, dict[str, str]]] = [
     (
+        re.compile(r"star schema|data model|dimensional|\bmodel the\b", re.I),
+        "retail_order_lines",
+        "model_data",
+        "The user wants raw data turned into an analytics model: a data modeling task.",
+        {"subject": "order lines", "requirements": ""},
+    ),
+    (
         re.compile(r"\b(churn|predict)", re.I),
         "customer_churn",
         "predict",
@@ -155,7 +162,27 @@ def data_agent(req: Request) -> list[Any]:
     results = _results(req)
     if not results:
         return [ToolUseBlock("profile_dataset", {"table": _table(req)})]
+    modeling = "(intent: model_data)" in req.first_user_text
+    if modeling and len(results) == 1:
+        return [ToolUseBlock("analyze_keys", {"table": _table(req)})]
     profile = results[0]
+    if modeling:
+        keys = results[1]["result"]
+        unstable = ", ".join(
+            f"{u['column']} varies for {u['violations']} {u['entity']} values"
+            for u in keys["unstable_attributes"]
+        )
+        return [
+            ToolUseBlock(
+                "finish_step",
+                {
+                    "summary": f"Profiled {_table(req)} ({profile['artifact_id']}) and found its grain "
+                    f"({' + '.join(keys['grain'])}) with analyze_keys ({results[1]['artifact_id']}). "
+                    f"Duplicate rows: {keys['duplicate_rows']}. Unstable attributes: {unstable or 'none'}.",
+                    "key_artifact_ids": [profile["artifact_id"], results[1]["artifact_id"]],
+                },
+            )
+        ]
     findings = profile["result"].get("findings", [])
     issues = ", ".join(f"{f['issue']} ({f['column'] or 'table'})" for f in findings) or "none"
     return [
@@ -275,6 +302,8 @@ def _artifacts(req: Request) -> dict[str, dict[str, Any]]:
 
 def insights(req: Request) -> list[Any]:
     arts = _artifacts(req)
+    if any(k.startswith("Data model:") for k in arts):
+        return datamodel_insights(arts)
     if any(k.startswith("A/B test:") for k in arts):
         return experiment_insights(arts)
     if any(k.startswith("Difference-in-differences:") for k in arts):
@@ -567,6 +596,107 @@ def ml_agent(req: Request) -> list[Any]:
     ]
 
 
+def modeler_agent(req: Request) -> list[Any]:
+    table = _table(req)
+    results = _results(req)
+    if not results:
+        return [ToolUseBlock("suggest_star_schema", {"table": table})]
+    if len(results) == 1:
+        return [
+            ToolUseBlock(
+                "build_data_model",
+                {
+                    "name": "Retail order lines star schema",
+                    "description": "Order lines as a fact table with customer, product, and date dimensions.",
+                    "nodes": results[0]["nodes"],
+                },
+            )
+        ]
+    built = results[1]
+    summary = built["result"]["summary"]
+    failing = "; ".join(f"{t['id']} ({t['failures']} rows)" for t in built["result"]["failing_tests"])
+    return [
+        ToolUseBlock(
+            "finish_step",
+            {
+                "summary": f"Built the star schema ({built['artifact_id']}): {summary['nodes_built']} nodes, "
+                f"{summary['tests_passed']} of {summary['tests']} tests pass. Failing: {failing or 'none'}.",
+                "key_artifact_ids": [built["artifact_id"]],
+            },
+        )
+    ]
+
+
+def datamodel_insights(arts: dict[str, dict[str, Any]]) -> list[Any]:
+    model = next(v for k, v in arts.items() if k.startswith("Data model:"))
+    keys = next(v for k, v in arts.items() if k.startswith("Keys and entities:"))
+    d = model["data"]
+    index = {n["name"]: i for i, n in enumerate(d["nodes"])}
+    fact = next(n for n in d["nodes"] if n["layer"] == "fact")
+    dims = [n for n in d["nodes"] if n["layer"] == "dimension"]
+    fi = index[fact["name"]]
+    dim_text = ", ".join(f"{n['name']} ({n['row_count']:,} rows)" for n in dims)
+    out = [
+        {
+            "title": f"The export fits a star schema with {len(dims)} dimensions",
+            "claim": f"{fact['name']} keeps one row per {' + '.join(keys['data']['grain'])} "
+            f"({fact['row_count']:,} rows) and joins to {dim_text}.",
+            "evidence": [_ev(model, f"nodes.{fi}.row_count")]
+            + [_ev(model, f"nodes.{index[n['name']]}.row_count") for n in dims]
+            + [_ev(model, "summary.tests_failed"), _ev(model, "summary.tests")],
+            "method": "Grain and entities from exact uniqueness and functional-dependency checks; nodes "
+            "built in the sandbox and tested for uniqueness, nulls, accepted values, and referential integrity.",
+            "caveats": [
+                f"{d['summary']['tests_failed']} of {d['summary']['tests']} tests fail; the failing rows are "
+                "described in the next insight."
+            ],
+            "recommended_action": "Review the draft data model, then publish the fact and dimensions as datasets.",
+            "confidence": "medium",
+        }
+    ]
+    failed = [(i, t) for i, t in enumerate(d["tests"]) if t["status"] == "fail"]
+    if failed:
+        ti, test = failed[0]
+        out.append(
+            {
+                "title": f"{test['failures']} order lines have no customer",
+                "claim": f"The {test['description']} test on {test['node']} fails for {test['failures']} of "
+                f"{fact['row_count']:,} rows; every customer id that is present resolves to dim_customer.",
+                "evidence": [_ev(model, f"tests.{ti}.failures"), _ev(model, f"nodes.{fi}.row_count")],
+                "method": "not_null and relationships tests on the fact's foreign keys.",
+                "caveats": [
+                    "The test fails because of the source, not the transform: these look like guest checkouts."
+                ],
+                "recommended_action": "Add an 'unknown customer' member to dim_customer and map missing ids to "
+                "it, so revenue from guest orders is not dropped by inner joins.",
+                "confidence": "medium",
+            }
+        )
+    unstable = keys["data"]["unstable_attributes"]
+    if unstable:
+        u = unstable[0]
+        out.append(
+            {
+                "title": f"{u['column']} is not stable for {u['violations']} customers",
+                "claim": f"{u['column']} takes more than one value for {u['violations']} of {u['groups']} "
+                f"customers (for example {u['examples'][0]}), so the dimension keeps each customer's latest value.",
+                "evidence": [
+                    _ev(keys, "unstable_attributes.0.violations"),
+                    _ev(keys, "unstable_attributes.0.groups"),
+                    _ev(keys, "unstable_attributes.0.examples.0"),
+                ],
+                "method": "Functional-dependency check of each attribute against its entity key.",
+                "caveats": [
+                    "Reports by region will place these customers' earlier orders in their new region."
+                ],
+                "recommended_action": "If history matters, model the customer as a slowly changing dimension with "
+                "one row per customer and validity period.",
+                "confidence": "medium",
+            }
+        )
+    return [ToolUseBlock("submit_insights", {"insights": out})]
+
+
 def _ev(art: dict[str, Any], path: str) -> dict[str, Any]:
     from inferra.verify.verifier import resolve_path
 
@@ -843,6 +973,8 @@ def demo_script(req: Request) -> list[Any]:
         return plan(req)
     if req.role == "insight":
         return insights(req)
+    if "build_data_model" in req.tool_names:
+        return modeler_agent(req)
     if "train_model" in req.tool_names:
         return ml_agent(req)
     if "power_analysis" in req.tool_names:

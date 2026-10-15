@@ -26,7 +26,7 @@ export default function ModelsPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Models</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">ML models</h1>
       {error && <ErrorBanner message={error} />}
       {!models && !error && <Spinner />}
       {models?.length === 0 && (

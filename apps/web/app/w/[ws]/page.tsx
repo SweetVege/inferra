@@ -17,6 +17,7 @@ const SUGGESTIONS = [
   "Predict which customers are likely to churn and tell me what drives it.",
   "Did the loyalty program increase weekly store sales?",
   "Forecast daily orders for the next four weeks.",
+  "Turn the order lines export into a star schema we can use for reporting.",
 ];
 
 export default function AskPage() {
