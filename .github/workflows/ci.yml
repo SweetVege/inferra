@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: inferra
+          POSTGRES_PASSWORD: inferra
+          POSTGRES_DB: inferra_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U inferra" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - name: Tests (SQLite)
+        run: uv run pytest -q
+      - name: Migrations apply cleanly
+        run: uv run alembic upgrade head
+        env:
+          INFERRA_DATABASE_URL: postgresql://inferra:inferra@localhost:5432/inferra_test
+      - name: Tests (Postgres)
+        run: uv run pytest -q
+        env:
+          INFERRA_TEST_DATABASE_URL: postgresql://inferra:inferra@localhost:5432/inferra_test
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm build
