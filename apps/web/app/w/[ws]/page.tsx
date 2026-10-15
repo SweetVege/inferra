@@ -13,8 +13,9 @@ import type { Dataset, RunDetail, RunSummary } from "@/lib/types";
 
 const SUGGESTIONS = [
   "Give me an overview of this dataset. What stands out, and can I trust the data?",
+  "Did the new checkout test win? Check conversion and make sure latency did not get worse.",
+  "How long would we need to run a test to detect a 5% lift in conversion?",
   "What is the average order value by region and channel?",
-  "Which columns have data-quality problems I should fix first?",
 ];
 
 export default function AskPage() {

@@ -18,6 +18,11 @@ CAUSAL = re.compile(
     re.I,
 )
 CAUSAL_DESIGNS = {"randomized", "causal"}
+# Statistical conventions, not measurements: "95% CI", "90% credible interval", "p < 0.001".
+CONVENTIONS = re.compile(
+    r"\b(?:80|90|95|99)\s?%\s?(?:CI|confidence|credible)|\bp\s?[<≤]\s?0?\.0*[15]\b",
+    re.I,
+)
 SAMPLE_KEYS = {"n", "count", "row_count", "sample_size"}
 MIN_SAMPLE = 30
 
@@ -162,6 +167,15 @@ def verify_insight(
             *draft.get("caveats", []),
         ]
     )
+    # "p < 0.001" is a convention, but it still has to be true of a cited p-value.
+    thresholds = [float(m) for m in re.findall(r"\bp\s?[<≤]\s?(0?\.0*[15])\b", prose, re.I)]
+    cited_p = [
+        float(ev["value"])
+        for ev in verdict.resolved_evidence
+        if _is_number(ev["value"]) and (_parts(ev["path"])[-1:] or [""])[0].endswith("p_value")
+    ]
+    false_thresholds = [f"p < {t:g}" for t in thresholds if not any(p < t for p in cited_p)]
+    prose = CONVENTIONS.sub(" ", prose)
     context_numbers = [t[1] for t in _number_tokens(context_text)]
     for ev in verdict.resolved_evidence:
         if isinstance(ev["value"], str):
@@ -172,6 +186,7 @@ def verify_insight(
         if not _grounded(value, decimals, suffix, evidence_numbers)
         and not _grounded(value, decimals, "", context_numbers)
     ]
+    ungrounded += false_thresholds
     verdict.checks.append(
         Check(
             "number_grounding",
@@ -211,4 +226,76 @@ def verify_insight(
             else "Confidence is consistent with the sample sizes cited.",
         )
     )
+
+    # Experiment hygiene applies only when experiment results are cited.
+    cited = [(ev, artifacts[ev["artifact_id"]]) for ev in verdict.resolved_evidence]
+    experiment_cited = [(ev, art) for ev, art in cited if art["kind"] in EXPERIMENT_KINDS]
+    if not experiment_cited:
+        return verdict
+
+    # 5. A p-value alone is not an effect size: cite the interval from the same result row.
+    missing_ci = []
+    for ev, _art in experiment_cited:
+        parts = _parts(ev["path"])
+        if parts and parts[-1] in {"p_value", "p_value_adjusted"}:
+            prefix = parts[:-1]
+            has_ci = any(
+                other["artifact_id"] == ev["artifact_id"]
+                and _parts(other["path"])[:-1] == prefix
+                and "ci_" in _parts(other["path"])[-1]
+                for other in verdict.resolved_evidence
+                if _parts(other["path"])
+            )
+            if not has_ci:
+                missing_ci.append(ev["path"])
+    verdict.checks.append(
+        Check(
+            "interval_reported",
+            not missing_ci,
+            "Cite the confidence interval alongside: " + ", ".join(missing_ci)
+            if missing_ci
+            else "Effects are reported with intervals, not p-values alone.",
+        )
+    )
+
+    # 6. Segment results must use multiplicity-adjusted p-values.
+    raw_segment_p = [
+        ev["path"]
+        for ev, art in experiment_cited
+        if art["kind"] == "segment_effects" and _parts(ev["path"])[-1:] == ["p_value"]
+    ]
+    verdict.checks.append(
+        Check(
+            "multiple_comparisons",
+            not raw_segment_p,
+            "Use p_value_adjusted for segment results instead of: " + ", ".join(raw_segment_p)
+            if raw_segment_p
+            else "Comparisons across segments are corrected for multiplicity.",
+        )
+    )
+
+    # 7. A failed sample ratio check invalidates effect estimates.
+    srm_failed = any(
+        isinstance(art["data"], dict) and art["data"].get("srm_ok") is False for _ev, art in experiment_cited
+    )
+    disclosed = draft.get("confidence") == "low" and any(
+        re.search(r"sample ratio|\bsrm\b|assignment", c, re.I) for c in draft.get("caveats", [])
+    )
+    if not srm_failed:
+        srm_detail = "Assignment counts match the intended split."
+    elif disclosed:
+        srm_detail = "Sample ratio mismatch is disclosed."
+    else:
+        srm_detail = (
+            "The cited test failed its sample ratio check; mark the insight low confidence and "
+            "explain the broken assignment in a caveat."
+        )
+    verdict.checks.append(Check("sample_ratio", not srm_failed or disclosed, srm_detail))
     return verdict
+
+
+EXPERIMENT_KINDS = {"ab_test", "cuped", "segment_effects", "bayesian", "sequential", "srm"}
+
+
+def _parts(path: str) -> list[str]:
+    return [p for p in re.split(r"\.|\[|\]", path or "") if p]

@@ -105,18 +105,72 @@ WORKFLOWS: dict[str, Workflow] = {
         Workflow(
             intent="experiment_design",
             title="Design an A/B test",
-            description="Power analysis, sample size, minimum detectable effect, and duration.",
-            examples=("How long should we run a pricing page test?",),
-            available=False,
-            phase="Phase 1",
+            description="Baseline, power analysis, sample size, minimum detectable effect, and duration.",
+            examples=(
+                "How long should we run a test on the checkout page?",
+                "How many users do we need to detect a 5% lift in conversion?",
+            ),
+            params=(
+                Param("metric", "Primary metric column for the test.", required=True),
+                Param("mde", "Smallest effect worth detecting, e.g. '5% relative' or '0.01 absolute'."),
+                Param("daily_traffic", "Units per day entering the test, if the user stated it."),
+                Param("variants", "Number of arms including control (default 2)."),
+                Param("date_column", "Date column to estimate daily traffic from the data."),
+            ),
+            steps=(
+                StepTemplate(
+                    "baseline",
+                    "data",
+                    "Locate '{metric}' and check it is usable as a test metric (type, missing values, "
+                    "unit of analysis). Identify a date column for traffic: {date_column}.",
+                ),
+                StepTemplate(
+                    "power",
+                    "experiment",
+                    "Measure the baseline of '{metric}' and daily traffic, then run a power analysis for "
+                    "MDE {mde} with {variants} variants (daily traffic: {daily_traffic}). Show how the "
+                    "detectable effect shrinks with longer durations.",
+                    depends_on=("baseline",),
+                ),
+                StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("baseline", "power")),
+            ),
         ),
         Workflow(
             intent="experiment_analysis",
             title="Analyze an A/B test",
-            description="SRM check, primary and guardrail metrics, CUPED, and segment results.",
-            examples=("Did variant B win?",),
-            available=False,
-            phase="Phase 1",
+            description="SRM, primary and guardrail metrics, CUPED, segments, Bayesian and sequential reads.",
+            examples=(
+                "Did variant B win?",
+                "Did the new checkout increase conversion without hurting latency?",
+            ),
+            params=(
+                Param("variant_column", "Column holding the assigned variant.", required=True),
+                Param("control", "Control variant label as it appears in the data."),
+                Param("primary_metric", "Primary success metric column.", required=True),
+                Param("guardrail_metrics", "Comma-separated metrics that must not get worse."),
+                Param("covariate", "Pre-experiment column for CUPED variance reduction."),
+                Param("segments", "Comma-separated columns to break the effect down by."),
+                Param("date_column", "Assignment date column, for sequential (peeking-safe) reads."),
+            ),
+            steps=(
+                StepTemplate(
+                    "validate",
+                    "data",
+                    "Validate the experiment data: the variant column '{variant_column}' and its labels "
+                    "(control: {control}), one row per unit, and usable metric columns "
+                    "({primary_metric}; guardrails: {guardrail_metrics}; covariate: {covariate}).",
+                ),
+                StepTemplate(
+                    "analyze",
+                    "experiment",
+                    "Analyze the test. Check sample ratio first. Test the primary metric '{primary_metric}' "
+                    "(with CUPED on {covariate} when available), each guardrail ({guardrail_metrics}), "
+                    "effects by segment ({segments}), the Bayesian probability that treatment wins, and an "
+                    "always-valid sequential read over {date_column}.",
+                    depends_on=("validate",),
+                ),
+                StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("validate", "analyze")),
+            ),
         ),
         Workflow(
             intent="estimate_effect",

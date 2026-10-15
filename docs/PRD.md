@@ -82,7 +82,7 @@ Data work is split across many tools: SQL clients, notebooks, BI dashboards, exp
 | Phase | Scope | Exit criteria |
 |---|---|---|
 | **0. Foundation** (done) | Monorepo, FastAPI + Next.js, auth, workspaces, file upload → Parquet + DuckDB, `DataSource` abstraction, job queue, LLM gateway, agent runtime skeleton (Orchestrator + DAG executor), Insight model + Verifier skeleton, CI, deploy | A trivial goal runs end to end and produces a verified insight in the UI |
-| **1. MVP** | NL goals for `explore`, `experiment_design`, and `experiment_analysis`; Data Hub profiling; Experimentation tools; Insight review; demo workspace | A user uploads an A/B dataset, asks "Did variant B win?", and gets a reviewed readout |
+| **1. MVP** (done) | NL goals for `explore`, `experiment_design`, and `experiment_analysis`; Data Hub profiling; Experimentation tools; Insight review; demo workspace | A user uploads an A/B dataset, asks "Did variant B win?", and gets a reviewed readout |
 | **2. Modeling Studio** | `estimate_effect`, `predict`, `forecast`; statistical and ML tools; model cards; model registry | A churn prediction and a DiD analysis run end to end on demo data |
 | **3. Analysis + Postgres** | `metric_query`, `diagnose`; metric layer; Postgres connector; insight feed | "Why did conversion drop?" works against a connected Postgres database |
 | **4. Data Modeling + Warehouses** | `model_data`; star-schema proposal, transforms, tests, lineage, dbt export; BigQuery and Snowflake connectors | Raw tables become a tested analytics model |

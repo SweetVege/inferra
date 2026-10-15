@@ -1,38 +1,11 @@
 "use client";
 
+import { DataTable } from "@/components/data-table";
+import { AbTestView, BaselineView, BayesianView, PowerView, SegmentView, SequentialView, SrmView } from "@/components/experiment-views";
 import { Findings } from "@/components/profile-view";
 import { CodeBlock } from "@/components/ui";
 import { formatNumber } from "@/lib/format";
 import type { Artifact, Finding } from "@/lib/types";
-
-export function DataTable({ columns, rows, max = 50 }: { columns: string[]; rows: Record<string, unknown>[]; max?: number }) {
-  return (
-    <div className="overflow-x-auto rounded-lg border border-line">
-      <table className="w-full text-[13px]">
-        <thead className="bg-surface-2 text-left text-xs text-ink-3">
-          <tr>
-            {columns.map((c) => (
-              <th key={c} className="whitespace-nowrap px-3 py-2 font-medium">
-                {c}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-line">
-          {rows.slice(0, max).map((row, i) => (
-            <tr key={i}>
-              {columns.map((c) => (
-                <td key={c} className={`whitespace-nowrap px-3 py-1.5 ${typeof row[c] === "number" ? "tabular text-right" : ""}`}>
-                  {formatNumber(row[c])}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
 
 export function ArtifactView({ artifact }: { artifact: Artifact }) {
   const d = artifact.data as Record<string, unknown>;
@@ -65,8 +38,18 @@ export function ArtifactView({ artifact }: { artifact: Artifact }) {
       </div>
     );
   }
+  if (artifact.kind === "ab_test") return <AbTestView d={d} />;
+  if (artifact.kind === "cuped") return <AbTestView d={d} cuped />;
+  if (artifact.kind === "segment_effects") return <SegmentView d={d} />;
+  if (artifact.kind === "srm") return <SrmView d={d} />;
+  if (artifact.kind === "power") return <PowerView d={d} />;
+  if (artifact.kind === "bayesian") return <BayesianView d={d} />;
+  if (artifact.kind === "sequential") return <SequentialView d={d} />;
+  if (artifact.kind === "baseline") return <BaselineView d={d} />;
   if (artifact.kind === "correlations") {
     return <DataTable columns={["a", "b", "r", "n"]} rows={d.pairs as Record<string, unknown>[]} />;
   }
   return <CodeBlock>{JSON.stringify(d, null, 2).slice(0, 4000)}</CodeBlock>;
 }
+
+export { DataTable };

@@ -75,3 +75,11 @@ def test_profile_matches_pandas(orders_csv: Path) -> None:
     assert ("duplicate_rows", None) in issues
     assert ("missing_values", "rating") in issues
     assert ("negative_amounts", "amount") in issues
+
+
+def test_binary_columns_are_not_flagged_as_outliers(tmp_path: Path) -> None:
+    csv = tmp_path / "flags.csv"
+    csv.write_text("flag,x\n" + "".join(f"{1 if i % 9 == 0 else 0},{i}\n" for i in range(200)))
+    profile = profile_table(make_source(csv), "orders")
+    assert "outlier_count" not in profile["columns"]["flag"]
+    assert not [f for f in profile["findings"] if f["issue"] == "outliers"]

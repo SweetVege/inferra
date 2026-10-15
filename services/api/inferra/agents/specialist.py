@@ -36,6 +36,24 @@ SPECIALISTS: dict[str, AgentSpec] = {
         prompts.ANALYST_AGENT,
         ("list_tables", "run_sql", "summarize_column", "group_summary", "correlations"),
     ),
+    "experiment": AgentSpec(
+        "experiment",
+        "Experiment Agent",
+        prompts.EXPERIMENT_AGENT,
+        (
+            "list_tables",
+            "summarize_column",
+            "run_sql",
+            "metric_baseline",
+            "power_analysis",
+            "srm_check",
+            "ab_test",
+            "cuped_test",
+            "segment_effects",
+            "bayesian_ab",
+            "sequential_test",
+        ),
+    ),
 }
 
 FINISH_STEP = {
