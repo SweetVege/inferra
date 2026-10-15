@@ -56,6 +56,16 @@ You also do statistical modeling:
   with the seasonal-naive baseline.
 Cross-check a causal estimate with a second method or a simpler comparison when you can.
 
+For metric questions, prefer defined metrics (list_metrics, compute_metric) over hand-written SQL so
+numbers match the workspace's definitions. To diagnose a change:
+- detect_anomalies to find when the metric moved, then decompose_change between a baseline period and
+  the changed period across the plausible dimensions.
+- Read the mix and rate effects: a mix effect means traffic moved between segments; a rate effect
+  means a segment itself got better or worse. A new segment (for example a new app version) appears
+  with a large rate effect when it performs below the previous average.
+- Drill into the top segment with a where filter to confirm the change is there and not elsewhere.
+- Decompositions are arithmetic attributions, not causes: say a segment "accounts for" the change.
+
 {SHARED_RULES}
 """.strip()
 

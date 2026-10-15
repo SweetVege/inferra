@@ -2,9 +2,10 @@
 
 import { Database, Upload } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ConnectionsPanel } from "@/components/connections";
 import { canEdit, useWorkspace } from "@/components/session";
 import { Badge, Button, Card, cx, EmptyState, ErrorBanner, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -13,6 +14,7 @@ import type { Dataset } from "@/lib/types";
 
 export default function DatasetsPage() {
   const { ws } = useParams<{ ws: string }>();
+  const router = useRouter();
   const workspace = useWorkspace(ws);
   const editable = canEdit(workspace);
   const input = useRef<HTMLInputElement>(null);
@@ -84,6 +86,7 @@ export default function DatasetsPage() {
           {uploading ? <Spinner label="Uploading and converting to Parquet…" /> : "Drop a CSV, TSV, Parquet, or Excel file here (up to 50 MB)."}
         </div>
       )}
+      {editable && <ConnectionsPanel ws={ws} onImported={(d) => router.push(`/w/${ws}/datasets/${d.id}`)} />}
       {!datasets && !error && <Spinner />}
       {datasets?.length === 0 && !editable && <EmptyState icon={Database} title="No datasets in this workspace" />}
       {datasets && datasets.length > 0 && (
@@ -96,7 +99,7 @@ export default function DatasetsPage() {
                     <p className="truncate font-medium">{d.display_name}</p>
                     <code className="font-mono text-xs text-ink-3">{d.table_name}</code>
                   </div>
-                  <Badge>{d.source_kind}</Badge>
+                  <Badge tone={d.source_kind === "postgres" ? "accent" : "neutral"}>{d.source_kind}</Badge>
                 </div>
                 {d.description && <p className="mt-2 line-clamp-2 text-sm text-ink-2">{d.description}</p>}
                 <p className="tabular mt-3 text-xs text-ink-3">

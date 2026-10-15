@@ -401,3 +401,34 @@ def test_forecasts_need_their_interval() -> None:
         MODELING,
     )
     assert ranged.verified, ranged.failures()
+
+
+def test_labels_in_cited_results_may_be_repeated() -> None:
+    artifacts = {
+        "d": {
+            "kind": "metric",
+            "data": {
+                "sql": "SELECT 1 LIMIT 50",
+                "rows": [{"app_version": "5.2", "value": 0.032}, {"app_version": "5.1", "value": 0.0585}],
+            },
+        }
+    }
+    v = verify_insight(
+        draft(
+            "Version 5.2 converts at 3.2% versus 5.85% for 5.1.",
+            [
+                {"artifact_id": "d", "path": "rows.0.value", "value": 0.032},
+                {"artifact_id": "d", "path": "rows.1.value", "value": 0.0585},
+            ],
+        ),
+        artifacts,
+    )
+    assert v.verified, v.failures()
+    sql_number = verify_insight(
+        draft(
+            "Version 5.2 converts at 3.2% in 50 regions.",
+            [{"artifact_id": "d", "path": "rows.0.value", "value": 0.032}],
+        ),
+        artifacts,
+    )
+    assert "50" in check(sql_number, "number_grounding").detail

@@ -40,6 +40,8 @@ class DatasetOut(ORM):
     columns: list[dict[str, str]]
     has_profile: bool = False
     created_at: datetime
+    connection_id: str | None = None
+    synced_at: datetime | None = None
 
 
 class DatasetDetail(DatasetOut):
@@ -156,3 +158,9 @@ class RunDetail(ORM):
     artifacts: list[ArtifactOut]
     insights: list[InsightOut]
     events: list[EventOut]
+
+
+class InsightFeedItem(InsightOut):
+    run_goal: str
+    run_intent: str | None
+    created_at: datetime

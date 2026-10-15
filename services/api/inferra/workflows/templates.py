@@ -71,9 +71,9 @@ WORKFLOWS: dict[str, Workflow] = {
             intent="metric_query",
             title="Answer a metric question",
             description="Compute a specific number, breakdown, or trend that the user asks for.",
-            examples=("Average order value by region", "How many active users per month?"),
+            examples=("Signup conversion rate by platform last month", "How many orders per week?"),
             params=(
-                Param("metric", "The measure to compute, in plain words.", required=True),
+                Param("metric", "A defined metric name, or the measure in plain words.", required=True),
                 Param("breakdown", "Dimensions or time grain to break the metric down by."),
                 Param("filters", "Any filters or time window the user mentioned."),
             ),
@@ -81,14 +81,15 @@ WORKFLOWS: dict[str, Workflow] = {
                 StepTemplate(
                     "prepare",
                     "data",
-                    "Find the tables and columns that define '{metric}', check they are usable, "
-                    "and note any data issues that affect it. Filters: {filters}.",
+                    "Find the defined metric or the tables and columns that express '{metric}', check "
+                    "they are usable, and note any data issues that affect it. Filters: {filters}.",
                 ),
                 StepTemplate(
                     "compute",
                     "analyst",
-                    "Compute '{metric}' broken down by {breakdown}, applying filters: {filters}. "
-                    "Report totals alongside the breakdown.",
+                    "Compute '{metric}' broken down by {breakdown}, applying filters: {filters}. Use "
+                    "compute_metric for defined metrics and SQL otherwise. Report totals alongside the "
+                    "breakdown.",
                     depends_on=("prepare",),
                 ),
                 StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("prepare", "compute")),
@@ -97,10 +98,33 @@ WORKFLOWS: dict[str, Workflow] = {
         Workflow(
             intent="diagnose",
             title="Diagnose a metric change",
-            description="Explain why a metric moved by decomposing the change across dimensions.",
-            examples=("Why did conversion drop last week?",),
-            available=False,
-            phase="Phase 3",
+            description="Find when a metric moved and which segments account for the change.",
+            examples=("Why did conversion drop last week?", "What is behind the revenue decline in October?"),
+            params=(
+                Param("metric", "A defined metric name, or the measure in plain words.", required=True),
+                Param("comparison_period", "The period with the change, as start..end dates if known."),
+                Param("baseline_period", "The period to compare against, as start..end dates if known."),
+                Param("dimensions", "Comma-separated columns to break the change down by."),
+            ),
+            steps=(
+                StepTemplate(
+                    "check",
+                    "data",
+                    "Check whether '{metric}' changed because of the data itself: missing days, "
+                    "volume drops that suggest broken tracking, or new values in the dimensions "
+                    "({dimensions}).",
+                ),
+                StepTemplate(
+                    "diagnose",
+                    "analyst",
+                    "Find when '{metric}' changed (detect_anomalies), then decompose the change between "
+                    "the baseline ({baseline_period}) and the comparison ({comparison_period}) across "
+                    "{dimensions}. Drill into the top segment with a filter to confirm where the change "
+                    "sits, and separate mix effects from rate effects.",
+                    depends_on=("check",),
+                ),
+                StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("check", "diagnose")),
+            ),
         ),
         Workflow(
             intent="experiment_design",

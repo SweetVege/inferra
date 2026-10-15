@@ -17,6 +17,7 @@ from inferra.config import get_settings
 from inferra.datasources.registry import datasource_for
 from inferra.db.models import Artifact, Dataset, Insight, Run, Step, Workspace
 from inferra.llm.gateway import LLMUnavailable, get_llm
+from inferra.metrics_layer import metric_specs
 from inferra.runtime.queue import enqueue, handler
 from inferra.runtime.recorder import Recorder
 from inferra.tools.base import ToolContext
@@ -54,7 +55,13 @@ def plan_run(db: Session, payload: dict[str, Any]) -> None:
     rec.event("planning", "Orchestrator is reading the goal and the dataset catalog")
     try:
         decision = plan_goal(
-            run.goal, datasets, list(run.dataset_ids), list(run.clarifications), get_llm(), rec
+            run.goal,
+            datasets,
+            list(run.dataset_ids),
+            list(run.clarifications),
+            get_llm(),
+            rec,
+            metrics=list(metric_specs(db, run.workspace_id).values()),
         )
     except LLMUnavailable as exc:
         _finish(db, run, "failed", str(exc))
@@ -104,7 +111,14 @@ def _finish(db: Session, run: Run, status: str, error: str | None = None) -> Non
     Recorder(db, run).event(status, error or f"Run {status}")
 
 
-def _brief(run: Run, step: Step, datasets: list[Dataset], done: list[Step], artifacts: list[Artifact]) -> str:
+def _brief(
+    run: Run,
+    step: Step,
+    datasets: list[Dataset],
+    done: list[Step],
+    artifacts: list[Artifact],
+    metrics: dict[str, dict[str, Any]] | None = None,
+) -> str:
     plan = run.plan or {}
     by_step: dict[str, list[Artifact]] = {}
     for a in artifacts:
@@ -117,6 +131,9 @@ def _brief(run: Run, step: Step, datasets: list[Dataset], done: list[Step], arti
     answered = [c for c in run.clarifications if c.get("answer")]
     if answered:
         lines.append("Clarifications: " + "; ".join(f"{c['question']} -> {c['answer']}" for c in answered))
+    if metrics:
+        lines += ["", "Defined metrics (use these names with the metric tools):"]
+        lines += [f"- {m['name']}: {m['label']} ({m['kind']} on {m['table']})" for m in metrics.values()]
     lines += [
         "",
         f"Your task: {step.task}",
@@ -151,7 +168,11 @@ def execute_run(db: Session, payload: dict[str, Any]) -> None:
     rec = Recorder(db, run)
     datasets = _datasets(db, run.workspace_id, list(run.dataset_ids))
     source = datasource_for(db, run.workspace_id, list(run.dataset_ids))
-    ctx = ToolContext(source=source, row_limit=get_settings().sql_row_limit)
+    ctx = ToolContext(
+        source=source,
+        row_limit=get_settings().sql_row_limit,
+        metrics=metric_specs(db, run.workspace_id, list(run.dataset_ids)),
+    )
     try:
         llm = get_llm()
     except LLMUnavailable as exc:
@@ -210,7 +231,7 @@ def execute_run(db: Session, payload: dict[str, Any]) -> None:
                 if spec is None:
                     raise RuntimeError(f"No agent named '{step.agent}'.")
                 result = run_specialist(
-                    spec, step, _brief(run, step, datasets, completed, artifacts), ctx, llm, rec
+                    spec, step, _brief(run, step, datasets, completed, artifacts, ctx.metrics), ctx, llm, rec
                 )
                 step.summary = result.summary
             step.status, step.finished_at = "completed", _now()

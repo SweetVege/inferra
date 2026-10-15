@@ -64,6 +64,20 @@ class Membership(TimestampMixin, Base):
     workspace: Mapped[Workspace] = relationship(back_populates="memberships")
 
 
+class Connection(TimestampMixin, Base):
+    """An external database. Data is pulled into Parquet extracts; the password is encrypted at rest."""
+
+    __tablename__ = "connections"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(20), default="postgres")
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # host, port, database, user, sslmode
+    secret: Mapped[str] = mapped_column(Text, default="")  # encrypted password
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+
 class Dataset(TimestampMixin, Base):
     __tablename__ = "datasets"
     __table_args__ = (UniqueConstraint("workspace_id", "table_name"),)
@@ -79,6 +93,34 @@ class Dataset(TimestampMixin, Base):
     row_count: Mapped[int] = mapped_column(Integer, default=0)
     columns: Mapped[list[Any]] = mapped_column(default=list)  # [{"name", "type"}]
     profile: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    # Extracts from a connection: what was pulled and when.
+    connection_id: Mapped[str | None] = mapped_column(ForeignKey("connections.id", ondelete="SET NULL"))
+    source_query: Mapped[str | None] = mapped_column(Text)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MetricDefinition(TimestampMixin, Base):
+    """A governed metric: a structured aggregate over one dataset, reused across runs."""
+
+    __tablename__ = "metrics"
+    __table_args__ = (UniqueConstraint("workspace_id", "name"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(100))  # identifier, e.g. conversion_rate
+    label: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text)
+    # sum | count | count_distinct | average | ratio; ratio uses numerator/denominator specs.
+    kind: Mapped[str] = mapped_column(String(20))
+    column: Mapped[str | None] = mapped_column(String(200))
+    numerator: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    denominator: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    filter: Mapped[str | None] = mapped_column(Text)
+    time_column: Mapped[str | None] = mapped_column(String(200))
+    dimensions: Mapped[list[Any]] = mapped_column(default=list)
+    format: Mapped[str] = mapped_column(String(20), default="number")  # number | percent | currency
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
 
