@@ -2,6 +2,7 @@
 
 import { DataTable } from "@/components/data-table";
 import { AbTestView, BaselineView, BayesianView, PowerView, SegmentView, SequentialView, SrmView } from "@/components/experiment-views";
+import { DidView, ForecastView, ModelView, PsmView, RegressionView } from "@/components/modeling-views";
 import { Findings } from "@/components/profile-view";
 import { CodeBlock } from "@/components/ui";
 import { formatNumber } from "@/lib/format";
@@ -46,6 +47,11 @@ export function ArtifactView({ artifact }: { artifact: Artifact }) {
   if (artifact.kind === "bayesian") return <BayesianView d={d} />;
   if (artifact.kind === "sequential") return <SequentialView d={d} />;
   if (artifact.kind === "baseline") return <BaselineView d={d} />;
+  if (artifact.kind === "regression") return <RegressionView d={d} />;
+  if (artifact.kind === "did") return <DidView d={d} />;
+  if (artifact.kind === "psm") return <PsmView d={d} />;
+  if (artifact.kind === "forecast") return <ForecastView d={d} />;
+  if (artifact.kind === "model") return <ModelView d={d} />;
   if (artifact.kind === "correlations") {
     return <DataTable columns={["a", "b", "r", "n"]} rows={d.pairs as Record<string, unknown>[]} />;
   }

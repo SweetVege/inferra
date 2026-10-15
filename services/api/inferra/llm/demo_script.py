@@ -40,9 +40,65 @@ def _catalog(req: Request) -> list[dict[str, Any]]:
     return json.loads(text[start:end])
 
 
+MODELING_ROUTES: list[tuple[re.Pattern[str], str, str, str, dict[str, str]]] = [
+    (
+        re.compile(r"\b(churn|predict)", re.I),
+        "customer_churn",
+        "predict",
+        "Predicting a label for each customer is a predictive modeling task.",
+        {"target": "churned", "features": "", "population": "all customers"},
+    ),
+    (
+        re.compile(r"\b(loyalty|program)\b", re.I),
+        "loyalty_program",
+        "estimate_effect",
+        "Stores joined the program at a known date and others did not: a difference-in-differences design.",
+        {
+            "treatment": "in_program",
+            "outcome": "weekly_sales",
+            "method": "diff_in_diff",
+            "unit_column": "store_id",
+            "time_column": "week_start",
+            "post_start": "2026-04-06",
+            "covariates": "",
+        },
+    ),
+    (
+        re.compile(r"\bforecast", re.I),
+        "daily_sales",
+        "forecast",
+        "The user wants future values of a time series.",
+        {"metric": "orders", "date_column": "date", "freq": "day", "horizon": "28"},
+    ),
+]
+
+
+def _modeling_plan(catalog: list[dict[str, Any]], goal: str) -> list[Any] | None:
+    for pattern, table, intent, rationale, params in MODELING_ROUTES:
+        dataset = next((d for d in catalog if d["table"] == table), None)
+        if dataset is not None and pattern.search(goal):
+            return [
+                TextBlock(rationale),
+                ToolUseBlock(
+                    "submit_plan",
+                    {
+                        "intent": intent,
+                        "dataset_ids": [dataset["id"]],
+                        "params": [{"name": k, "value": v} for k, v in params.items()],
+                        "rationale": rationale,
+                        "confidence": "high",
+                    },
+                ),
+            ]
+    return None
+
+
 def plan(req: Request) -> list[Any]:
     catalog = _catalog(req)
     goal = req.first_user_text.splitlines()[0]
+    routed = _modeling_plan(catalog, goal)
+    if routed is not None:
+        return routed
     experiment = next((d for d in catalog if any(c.startswith("variant ") for c in d["columns"])), None)
     if experiment is not None and EXPERIMENT_WORDS.search(goal):
         params = {
@@ -105,6 +161,56 @@ def data_agent(req: Request) -> list[Any]:
 def analyst_agent(req: Request) -> list[Any]:
     table = _table(req)
     results = _results(req)
+    if "(intent: estimate_effect)" in req.first_user_text:
+        if not results:
+            return [
+                ToolUseBlock(
+                    "diff_in_diff",
+                    {
+                        "table": table,
+                        "outcome": "weekly_sales",
+                        "unit_column": "store_id",
+                        "time_column": "week_start",
+                        "treated_column": "in_program",
+                        "post_start": "2026-04-06",
+                    },
+                )
+            ]
+        did = results[0]
+        return [
+            ToolUseBlock(
+                "finish_step",
+                {
+                    "summary": f"Difference-in-differences ({did['artifact_id']}): effect "
+                    f"{did['result']['att']:.2f} per store-week, pre-trend p = {did['result']['pretrend_p_value']:.3f}.",
+                    "key_artifact_ids": [did["artifact_id"]],
+                },
+            )
+        ]
+    if "(intent: forecast)" in req.first_user_text:
+        if not results:
+            return [
+                ToolUseBlock(
+                    "forecast",
+                    {
+                        "table": table,
+                        "date_column": "date",
+                        "value_column": "orders",
+                        "freq": "day",
+                        "horizon": 28,
+                    },
+                )
+            ]
+        fc = results[0]
+        return [
+            ToolUseBlock(
+                "finish_step",
+                {
+                    "summary": f"Forecast ({fc['artifact_id']}) with backtest MAPE {fc['result']['backtest']['mape']:.3f}.",
+                    "key_artifact_ids": [fc["artifact_id"]],
+                },
+            )
+        ]
     if len(results) == 0:
         return [
             ToolUseBlock(
@@ -157,6 +263,12 @@ def insights(req: Request) -> list[Any]:
     arts = _artifacts(req)
     if any(k.startswith("A/B test:") for k in arts):
         return experiment_insights(arts)
+    if any(k.startswith("Difference-in-differences:") for k in arts):
+        return did_insights(arts)
+    if any(k.startswith("Forecast:") for k in arts):
+        return forecast_insights(arts)
+    if any(k.startswith("Model:") for k in arts):
+        return model_insights(arts)
     profile = next(v for k, v in arts.items() if k.startswith("Profile of"))
     region = arts["Average order value by region"]
     returns = arts["Return rate by discount level"]
@@ -418,11 +530,187 @@ def experiment_insights(arts: dict[str, dict[str, Any]]) -> list[Any]:
     return [ToolUseBlock("submit_insights", {"insights": out})]
 
 
+def ml_agent(req: Request) -> list[Any]:
+    results = _results(req)
+    if not results:
+        return [
+            ToolUseBlock(
+                "train_model", {"table": _table(req), "target": "churned", "model_name": "Churn risk"}
+            )
+        ]
+    m = results[0]["result"]
+    return [
+        ToolUseBlock(
+            "finish_step",
+            {
+                "summary": f"Trained churn model ({results[0]['artifact_id']}); selected {m['selected_model']} "
+                f"with holdout AUC {m['holdout']['auc']:.3f}.",
+                "key_artifact_ids": [results[0]["artifact_id"]],
+            },
+        )
+    ]
+
+
+def _ev(art: dict[str, Any], path: str) -> dict[str, Any]:
+    from inferra.verify.verifier import resolve_path
+
+    return {"artifact_id": art["id"], "path": path, "value": resolve_path(art["data"], path)}
+
+
+def _money(x: float) -> str:
+    return f"${x:,.2f}"
+
+
+def did_insights(arts: dict[str, dict[str, Any]]) -> list[Any]:
+    did = next(v for k, v in arts.items() if k.startswith("Difference-in-differences:"))
+    d = did["data"]
+    credible = d["pretrend_ok"]
+    out = [
+        {
+            "title": "The loyalty program lifted weekly sales"
+            if credible
+            else "Effect estimate is not credible",
+            "claim": f"Joining the loyalty program caused an estimated {_pct(d['relative_effect'])} increase in "
+            f"weekly store sales (95% CI {_pct(d['relative_effect_ci_low'])} to "
+            f"{_pct(d['relative_effect_ci_high'])}), across {d['n_treated_units']} program stores.",
+            "evidence": [
+                _ev(did, "relative_effect"),
+                _ev(did, "relative_effect_ci_low"),
+                _ev(did, "relative_effect_ci_high"),
+                _ev(did, "n_treated_units"),
+            ],
+            "method": "Difference-in-differences with store and week fixed effects; standard errors clustered by store.",
+            "caveats": [
+                "This relies on parallel trends: without the program, program and non-program stores would "
+                f"have moved together. The pre-launch trend test does not reject this (p = {d['pretrend_p_value']:.3f}).",
+                "Stores were not randomly chosen for the program; differences that changed at launch would bias the estimate.",
+            ],
+            "recommended_action": "Expand the program to more stores and keep a holdout group to confirm the lift.",
+            "confidence": "high" if credible else "low",
+        },
+        {
+            "title": "Worth about two thousand dollars per store each week",
+            "claim": f"In dollars, the program adds {_money(d['att'])} per store per week "
+            f"(95% CI {_money(d['ci_low'])} to {_money(d['ci_high'])}), against a pre-launch average of "
+            f"{_money(d['treated_pre_mean'])} for program stores.",
+            "evidence": [
+                _ev(did, "att"),
+                _ev(did, "ci_low"),
+                _ev(did, "ci_high"),
+                _ev(did, "treated_pre_mean"),
+            ],
+            "method": "Same difference-in-differences model, effect in dollars.",
+            "caveats": [f"Pre-trend test p = {d['pretrend_p_value']:.3f}; program costs are not netted out."],
+            "recommended_action": "Compare this lift with the program's cost per store to judge ROI.",
+            "confidence": "medium",
+        },
+    ]
+    out[0]["evidence"].append(_ev(did, "pretrend_p_value"))
+    out[1]["evidence"].append(_ev(did, "pretrend_p_value"))
+    return [ToolUseBlock("submit_insights", {"insights": out})]
+
+
+def forecast_insights(arts: dict[str, dict[str, Any]]) -> list[Any]:
+    fc = next(v for k, v in arts.items() if k.startswith("Forecast:"))
+    d = fc["data"]
+    total, bt = d["horizon_total"], d["backtest"]
+    out = [
+        {
+            "title": f"Expect about {total['forecast']:,.0f} orders over the next {d['horizon']} days",
+            "claim": f"The forecast for the next {d['horizon']} days totals {total['forecast']:,.0f} orders "
+            f"(95% interval {total['lower']:,.0f} to {total['upper']:,.0f}).",
+            "evidence": [
+                _ev(fc, "horizon"),
+                _ev(fc, "horizon_total.forecast"),
+                _ev(fc, "horizon_total.lower"),
+                _ev(fc, "horizon_total.upper"),
+            ],
+            "method": d["model"] + " on daily totals; intervals from 1,000 simulated paths.",
+            "caveats": ["The interval reflects past volatility; promotions or outages are not modeled."],
+            "recommended_action": "Plan fulfillment capacity for the upper end of the interval.",
+            "confidence": "medium",
+        },
+        {
+            "title": "The model beats a seasonal-naive forecast",
+            "claim": f"In a {bt['holdout_periods']}-day backtest the model's average error was {_pct(bt['mape'])}, "
+            f"compared with {_pct(bt['seasonal_naive_mape'])} for repeating last week.",
+            "evidence": [
+                _ev(fc, "backtest.holdout_periods"),
+                _ev(fc, "backtest.mape"),
+                _ev(fc, "backtest.seasonal_naive_mape"),
+            ],
+            "method": "Holdout backtest on the most recent periods (mean absolute percentage error).",
+            "caveats": ["One backtest window; accuracy can differ in peak season."],
+            "recommended_action": "Re-run the forecast weekly as new data arrives.",
+            "confidence": "high",
+        },
+    ]
+    out[0]["evidence"].append(_ev(fc, "history_periods"))
+    out[0]["caveats"][0] += f" Trained on {d['history_periods']} days of history."
+    return [ToolUseBlock("submit_insights", {"insights": out})]
+
+
+def model_insights(arts: dict[str, dict[str, Any]]) -> list[Any]:
+    model = next(v for k, v in arts.items() if k.startswith("Model:"))
+    d = model["data"]
+    h = d["holdout"]
+    top, second = d["drivers"][0], d["drivers"][1]
+    out = [
+        {
+            "title": "The churn model ranks customers usefully",
+            "claim": f"On held-out customers the model reaches an AUC of {h['auc']:.3f}, and its highest-scored "
+            f"decile contains {_pct(h['top_decile_capture'])} of churners, a {h['top_decile_lift']:.1f}x lift.",
+            "evidence": [
+                _ev(model, "holdout.auc"),
+                _ev(model, "holdout.top_decile_capture"),
+                _ev(model, "holdout.top_decile_lift"),
+            ],
+            "method": f"{d['algorithm']}; evaluated on a stratified holdout of {d['n_test']:,} customers.",
+            "caveats": [
+                "Evaluated on a random split from the same period; check performance on next month's customers."
+            ],
+            "recommended_action": "Use the registered model to score active customers and target the top decile for retention.",
+            "confidence": "high",
+        },
+        {
+            "title": "A simple model is enough"
+            if d["selected_model"] != "gradient-boosted trees"
+            else "Trees beat the linear baseline",
+            "claim": f"The {d['selected_model']} reached a holdout AUC of {h['auc']:.3f} versus "
+            f"{d['tree_model_holdout']['auc']:.3f} for gradient-boosted trees, so the registry keeps the "
+            f"{d['selected_model']}.",
+            "evidence": [_ev(model, "holdout.auc"), _ev(model, "tree_model_holdout.auc")],
+            "method": "Both models trained on the same split; the better holdout AUC is registered.",
+            "caveats": [
+                "The difference is small relative to holdout noise; either model would rank similarly."
+            ],
+            "recommended_action": "Prefer the simpler model for easier monitoring and explanation.",
+            "confidence": "medium",
+        },
+        {
+            "title": f"{top['feature']} and {second['feature']} drive the predictions",
+            "claim": f"{top['feature']} accounts for {_pct(top['share_of_importance'])} of the model's attributions "
+            f"and {second['feature']} for {_pct(second['share_of_importance'])}.",
+            "evidence": [
+                _ev(model, "drivers.0.share_of_importance"),
+                _ev(model, "drivers.1.share_of_importance"),
+            ],
+            "method": "SHAP values on the holdout set (mean absolute contribution).",
+            "caveats": ["Drivers describe how the model scores customers, not what causes churn."],
+            "recommended_action": "Test re-engagement for low-activity, new customers before assuming it reduces churn.",
+            "confidence": "medium",
+        },
+    ]
+    return [ToolUseBlock("submit_insights", {"insights": out})]
+
+
 def demo_script(req: Request) -> list[Any]:
     if req.role == "planning":
         return plan(req)
     if req.role == "insight":
         return insights(req)
+    if "train_model" in req.tool_names:
+        return ml_agent(req)
     if "power_analysis" in req.tool_names:
         return experiment_agent(req)
     if "profile_dataset" in req.tool_names and "group_summary" not in req.tool_names:

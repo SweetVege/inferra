@@ -14,8 +14,9 @@ import type { Dataset, RunDetail, RunSummary } from "@/lib/types";
 const SUGGESTIONS = [
   "Give me an overview of this dataset. What stands out, and can I trust the data?",
   "Did the new checkout test win? Check conversion and make sure latency did not get worse.",
-  "How long would we need to run a test to detect a 5% lift in conversion?",
-  "What is the average order value by region and channel?",
+  "Predict which customers are likely to churn and tell me what drives it.",
+  "Did the loyalty program increase weekly store sales?",
+  "Forecast daily orders for the next four weeks.",
 ];
 
 export default function AskPage() {
@@ -168,7 +169,7 @@ export default function AskPage() {
       <section>
         <SectionTitle>How Inferra works</SectionTitle>
         <div className="grid gap-3 sm:grid-cols-2">
-          {(["orchestrator", "data", "analyst", "insight"] as const).map((key) => (
+          {(["orchestrator", "data", "analyst", "experiment", "ml", "insight"] as const).map((key) => (
             <Card key={key} className="flex items-start gap-3 p-4">
               <AgentAvatar agent={key} />
               <div>

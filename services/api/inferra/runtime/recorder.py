@@ -4,9 +4,10 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from inferra.db.models import Artifact, Run, RunEvent, Step, ToolCall
+from inferra import storage
+from inferra.db.models import Artifact, Model, Run, RunEvent, Step, ToolCall
 from inferra.llm.gateway import Usage
-from inferra.tools.base import ArtifactDraft
+from inferra.tools.base import ArtifactDraft, ModelDraft
 
 
 class Recorder:
@@ -23,6 +24,31 @@ class Recorder:
         total.add(usage)
         self.run.usage = total.as_dict()
         self.db.commit()
+
+    def model(self, draft: ModelDraft) -> str:
+        """Register a trained model: payload to object storage, metadata to the registry."""
+        model = Model(
+            workspace_id=self.run.workspace_id,
+            run_id=self.run.id,
+            name=draft.name,
+            task=draft.task,
+            target=draft.target,
+            source_table=draft.table,
+            features=draft.features,
+            metrics=draft.metrics,
+            card=draft.card,
+            storage_key="",
+            created_by=self.run.created_by,
+        )
+        self.db.add(model)
+        self.db.flush()
+        model.storage_key = f"workspaces/{self.run.workspace_id}/models/{model.id}.json"
+        path = storage.local_path(model.storage_key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(draft.payload)
+        storage.put_file(model.storage_key, path)
+        self.db.commit()
+        return model.id
 
     def artifact(self, step: Step | None, draft: ArtifactDraft) -> Artifact:
         art = Artifact(

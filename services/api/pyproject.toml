@@ -22,6 +22,9 @@ dependencies = [
   "openpyxl>=3.1",
   "boto3>=1.35",
   "anthropic>=1.15",
+  "statsmodels>=0.15.0",
+  "scikit-learn>=1.9.1",
+  "lightgbm>=4.7.0",
 ]
 
 [dependency-groups]
@@ -29,7 +32,6 @@ dev = [
     "pytest>=8.3",
     "ruff>=0.8",
     "mypy>=1.13",
-    "statsmodels>=0.15.0",
 ]
 
 [build-system]
@@ -53,3 +55,4 @@ testpaths = ["tests"]
 [tool.ruff.lint.per-file-ignores]
 "inferra/agents/prompts.py" = ["E501"]
 "tests/*" = ["E501"]
+"inferra/llm/demo_script.py" = ["E501"]

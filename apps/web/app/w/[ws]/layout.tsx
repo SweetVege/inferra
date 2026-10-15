@@ -1,6 +1,6 @@
 "use client";
 
-import { Database, History, LogOut, Moon, Sparkles, Sun } from "lucide-react";
+import { Brain, Database, History, LogOut, Moon, Sparkles, Sun } from "lucide-react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -56,6 +56,7 @@ function Shell({ children }: { children: ReactNode }) {
     { href: base, label: "Ask", icon: Sparkles, active: pathname === base },
     { href: `${base}/runs`, label: "Runs", icon: History, active: pathname.startsWith(`${base}/runs`) },
     { href: `${base}/datasets`, label: "Datasets", icon: Database, active: pathname.startsWith(`${base}/datasets`) },
+    { href: `${base}/models`, label: "Models", icon: Brain, active: pathname.startsWith(`${base}/models`) },
   ];
 
   return (
@@ -79,7 +80,7 @@ function Shell({ children }: { children: ReactNode }) {
             </option>
           ))}
         </select>
-        <nav className="flex gap-1 md:flex-col">
+        <nav className="flex gap-1 overflow-x-auto md:flex-col">
           {nav.map(({ href, label, icon: Icon, active }) => (
             <Link
               key={href}

@@ -13,14 +13,14 @@ NUMBER = re.compile(
     r"(?P<suffix>\s?%|\s?pp\b|[kKMB]\b|x\b|×)?"
 )
 CAUSAL = re.compile(
-    r"\b(caus(?:e|es|ed|ing)|drove|drives|driven by|leads? to|led to|results? in|resulted in|"
+    r"(?<![\w-])(caus(?:e|es|ed|ing)|drove|drives|driven by|leads? to|led to|results? in|resulted in|"
     r"because of|impact(?:s|ed)? on|effect of|increased? by doing|boost(?:s|ed)?)\b",
     re.I,
 )
 CAUSAL_DESIGNS = {"randomized", "causal"}
 # Statistical conventions, not measurements: "95% CI", "90% credible interval", "p < 0.001".
 CONVENTIONS = re.compile(
-    r"\b(?:80|90|95|99)\s?%\s?(?:CI|confidence|credible)|\bp\s?[<≤]\s?0?\.0*[15]\b",
+    r"\b(?:80|90|95|99)\s?%\s?(?:CI|confidence|credible|prediction|interval)|\bp\s?[<≤]\s?0?\.0*[15]\b",
     re.I,
 )
 SAMPLE_KEYS = {"n", "count", "row_count", "sample_size"}
@@ -227,38 +227,79 @@ def verify_insight(
         )
     )
 
-    # Experiment hygiene applies only when experiment results are cited.
     cited = [(ev, artifacts[ev["artifact_id"]]) for ev in verdict.resolved_evidence]
+    estimates_cited = [(ev, art) for ev, art in cited if art["kind"] in ESTIMATE_KINDS]
+
+    # 5. Estimates need their uncertainty: a p-value, effect, or forecast cites its interval.
+    if estimates_cited:
+        missing = []
+        for ev, _art in estimates_cited:
+            parts = _parts(ev["path"])
+            needs = NEEDS_INTERVAL.get(parts[-1]) if parts else None
+            if needs is None:
+                continue
+            prefix, key = parts[:-1], parts[-1]
+            has_interval = any(
+                other["artifact_id"] == ev["artifact_id"]
+                and _parts(other["path"])[:-1] == prefix
+                and _interval_matches(key, _parts(other["path"])[-1], needs)
+                for other in verdict.resolved_evidence
+                if _parts(other["path"])
+            )
+            if not has_interval:
+                missing.append(ev["path"])
+        verdict.checks.append(
+            Check(
+                "interval_reported",
+                not missing,
+                "Cite the interval alongside: " + ", ".join(missing)
+                if missing
+                else "Estimates are reported with their intervals.",
+            )
+        )
+
+    # 6. Observational causal claims must name the assumption they rest on.
+    causal_methods = [
+        art for _ev, art in cited if art["data"].get("assumption_keywords") if isinstance(art["data"], dict)
+    ]
+    if causal_terms and causal_methods:
+        keywords = {k for art in causal_methods for k in art["data"]["assumption_keywords"]}
+        caveats = " ".join(draft.get("caveats", [])).lower()
+        stated = any(k.lower() in caveats for k in keywords)
+        verdict.checks.append(
+            Check(
+                "assumptions_stated",
+                stated,
+                "Causal wording from an observational method needs a caveat naming its assumption: "
+                + ", ".join(sorted(keywords))
+                if not stated
+                else "The identifying assumption is stated.",
+            )
+        )
+
+    # 7. Model performance comes from held-out data.
+    train_paths = [
+        ev["path"]
+        for ev, art in cited
+        if art["kind"] == "model" and _parts(ev["path"])[:1] == ["train_metrics"]
+    ]
+    if any(art["kind"] == "model" for _ev, art in cited):
+        verdict.checks.append(
+            Check(
+                "holdout_metrics",
+                not train_paths,
+                "Cite holdout or cross-validation metrics instead of training metrics: "
+                + ", ".join(train_paths)
+                if train_paths
+                else "Model performance is reported on held-out data.",
+            )
+        )
+
     experiment_cited = [(ev, art) for ev, art in cited if art["kind"] in EXPERIMENT_KINDS]
     if not experiment_cited:
         return verdict
 
-    # 5. A p-value alone is not an effect size: cite the interval from the same result row.
-    missing_ci = []
-    for ev, _art in experiment_cited:
-        parts = _parts(ev["path"])
-        if parts and parts[-1] in {"p_value", "p_value_adjusted"}:
-            prefix = parts[:-1]
-            has_ci = any(
-                other["artifact_id"] == ev["artifact_id"]
-                and _parts(other["path"])[:-1] == prefix
-                and "ci_" in _parts(other["path"])[-1]
-                for other in verdict.resolved_evidence
-                if _parts(other["path"])
-            )
-            if not has_ci:
-                missing_ci.append(ev["path"])
-    verdict.checks.append(
-        Check(
-            "interval_reported",
-            not missing_ci,
-            "Cite the confidence interval alongside: " + ", ".join(missing_ci)
-            if missing_ci
-            else "Effects are reported with intervals, not p-values alone.",
-        )
-    )
-
-    # 6. Segment results must use multiplicity-adjusted p-values.
+    # 8. Segment results must use multiplicity-adjusted p-values.
     raw_segment_p = [
         ev["path"]
         for ev, art in experiment_cited
@@ -274,7 +315,7 @@ def verify_insight(
         )
     )
 
-    # 7. A failed sample ratio check invalidates effect estimates.
+    # 9. A failed sample ratio check invalidates effect estimates.
     srm_failed = any(
         isinstance(art["data"], dict) and art["data"].get("srm_ok") is False for _ev, art in experiment_cited
     )
@@ -295,6 +336,25 @@ def verify_insight(
 
 
 EXPERIMENT_KINDS = {"ab_test", "cuped", "segment_effects", "bayesian", "sequential", "srm"}
+ESTIMATE_KINDS = EXPERIMENT_KINDS | {"did", "psm", "regression", "forecast"}
+# Which cited keys need an interval, and which sibling keys count as that interval.
+NEEDS_INTERVAL = {
+    "p_value": "ci",
+    "p_value_adjusted": "ci",
+    "att": "ci",
+    "estimate": "ci",
+    "relative_effect": "ci",
+    "odds_ratio": "ci",
+    "forecast": "bounds",
+}
+
+
+def _interval_matches(key: str, other: str, needs: str) -> bool:
+    if needs == "bounds":
+        return other in {"lower", "upper"}
+    if key in {"relative_effect", "odds_ratio"}:
+        return other.startswith(f"{key}_ci_")
+    return other.startswith("ci_") or "_ci_" in other
 
 
 def _parts(path: str) -> list[str]:

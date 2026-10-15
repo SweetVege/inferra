@@ -242,3 +242,32 @@ export interface RunDetail {
   insights: Insight[];
   events: RunEvent[];
 }
+
+export interface ModelSummary {
+  id: string;
+  run_id: string | null;
+  name: string;
+  task: "classification" | "regression";
+  target: string;
+  source_table: string;
+  features: string[];
+  metrics: { cv?: Record<string, unknown>; holdout?: Record<string, number>; baseline?: Record<string, unknown> };
+  created_at: string;
+}
+
+export interface ModelCard {
+  name: string;
+  task: string;
+  target: string;
+  algorithm: string;
+  training_data: { table: string; rows: number; train_rows: number; test_rows: number; sampled: boolean };
+  features: string[];
+  excluded_features: { feature: string; reason: string }[];
+  top_drivers: string[];
+  intended_use: string;
+  limitations: string[];
+}
+
+export interface ModelDetail extends ModelSummary {
+  card: ModelCard;
+}

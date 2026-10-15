@@ -169,9 +169,11 @@ The **Verifier** is deterministic code that runs on every draft:
 2. **Number grounding.** Every number in the title, claim, caveats, and action must match a cited value at the precision shown (fractions may be written as percentages). Statistical conventions such as "95% CI" are exempt, but a stated threshold like "p < 0.001" must be true of a cited p-value.
 3. **Causal language.** Causal wording ("caused", "drove", "led to") is allowed only when a cited artifact comes from a randomized design (with a passing sample ratio check) or an explicit causal method. Caveats may discuss causation freely.
 4. **Sample size.** Fewer than 30 observations cannot support a high-confidence claim.
-5. **Intervals.** A cited p-value needs the matching confidence interval from the same result.
+5. **Intervals.** A cited p-value, effect estimate, or forecast needs its interval from the same result.
 6. **Multiple comparisons.** Segment results must cite Holm-adjusted p-values.
 7. **Sample ratio.** An experiment that failed its SRM check can only appear as a low-confidence insight that discloses the broken assignment.
+8. **Assumptions.** Causal wording from an observational method (difference-in-differences, matching) needs a passing method check (parallel pre-trends, covariate balance) and a caveat naming the identifying assumption.
+9. **Held-out metrics.** Model performance must be cited from holdout or cross-validation results, never training metrics; forecasts must be cited with their prediction interval.
 
 The verifier checks that numbers are grounded and that the wording matches the strength of the evidence; it cannot judge whether the reasoning connecting them is right. That is what human review is for.
 
@@ -215,6 +217,7 @@ erDiagram
   Report }o--o{ Insight : includes
   Workspace ||--o{ Experiment : registers
   Workspace ||--o{ Model : registers
+  Run ||--o{ Model : trains
   Workspace ||--o{ MetricDefinition : defines
 ```
 
@@ -236,10 +239,10 @@ inferra/
 │  ├─ inferra/
 │  │  ├─ api/                 # FastAPI routes and response schemas
 │  │  ├─ auth/                # GitHub OAuth, signed-cookie sessions, workspace roles
-│  │  ├─ agents/              # orchestrator.py, specialist.py (Data, Analyst, Experiment), insight.py, prompts.py
+│  │  ├─ agents/              # orchestrator.py, specialist.py (Data, Analyst, Experiment, ML), insight.py, prompts.py
 │  │  ├─ workflows/           # intent templates
 │  │  ├─ runtime/             # job queue, run executor, recorder (tool calls, artifacts, events)
-│  │  ├─ tools/               # typed tools: profiling, SQL, aggregation, correlations, experiments
+│  │  ├─ tools/               # typed tools: profiling, SQL, experiments, modeling (regression, DiD, PSM, forecast), ml
 │  │  ├─ verify/              # deterministic insight verifier
 │  │  ├─ datasources/         # DataSource protocol, sandboxed DuckDB file source
 │  │  ├─ llm/                 # Claude gateway, scripted client, demo script

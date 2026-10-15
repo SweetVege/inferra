@@ -15,6 +15,7 @@
   --accent-soft: #e8effb;
   --accent-text: #ffffff;
   --series-1: #2a78d6;
+  --series-2: #eb6834;
   --good: #137a3f;
   --good-soft: #e6f4ec;
   --warn: #9a5b00;
@@ -38,6 +39,7 @@
     --accent-soft: #1d2a40;
     --accent-text: #0b0b0b;
     --series-1: #3987e5;
+    --series-2: #d95926;
     --good: #4cc27f;
     --good-soft: #15291d;
     --warn: #e0a64a;
@@ -61,6 +63,7 @@
   --accent-soft: #1d2a40;
   --accent-text: #0b0b0b;
   --series-1: #3987e5;
+  --series-2: #d95926;
   --good: #4cc27f;
   --good-soft: #15291d;
   --warn: #e0a64a;
@@ -82,6 +85,7 @@
   --color-accent-soft: var(--accent-soft);
   --color-accent-ink: var(--accent-text);
   --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
   --color-good: var(--good);
   --color-good-soft: var(--good-soft);
   --color-warn: var(--warn);

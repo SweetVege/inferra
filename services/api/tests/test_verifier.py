@@ -277,3 +277,127 @@ def test_p_value_thresholds_must_be_true() -> None:
     assert honest.verified, honest.failures()
     overstated = verify_insight(draft("Lift 10.4% (95% CI 3.4% to 17.5%, p < 0.001).", evidence), EXPERIMENTS)
     assert "p < 0.001" in check(overstated, "number_grounding").detail
+
+
+def test_model_names_and_interval_conventions_are_not_flagged() -> None:
+    v = verify_insight(
+        draft(
+            "Gradient-boosted trees reached 612 orders (95% interval 612 to 612).",
+            [{"artifact_id": "a1", "path": "rows.0.n", "value": 612}],
+        ),
+        ARTIFACTS,
+    )
+    assert check(v, "causal_language").passed
+    assert check(v, "number_grounding").passed
+    boosted = verify_insight(
+        draft(
+            "The promotion boosted orders to 612.", [{"artifact_id": "a1", "path": "rows.0.n", "value": 612}]
+        ),
+        ARTIFACTS,
+    )
+    assert not check(boosted, "causal_language").passed
+
+
+MODELING = {
+    "did": {
+        "kind": "did",
+        "data": {
+            "design": "causal",
+            "assumption_keywords": ["parallel trend"],
+            "att": 1974.8,
+            "ci_low": 1532.7,
+            "ci_high": 2417.0,
+            "relative_effect": 0.0568,
+            "relative_effect_ci_low": 0.044,
+            "relative_effect_ci_high": 0.07,
+        },
+    },
+    "did_bad": {
+        "kind": "did",
+        "data": {
+            "design": "causal_pretrend_failed",
+            "assumption_keywords": ["parallel trend"],
+            "relative_effect": 0.0568,
+            "relative_effect_ci_low": 0.044,
+            "relative_effect_ci_high": 0.07,
+        },
+    },
+    "model": {"kind": "model", "data": {"holdout": {"auc": 0.792}, "train_metrics": {"auc": 0.981}}},
+    "fc": {
+        "kind": "forecast",
+        "data": {"horizon_total": {"forecast": 16737.3, "lower": 13222.0, "upper": 20395.3}},
+    },
+}
+
+
+def mev(artifact: str, path: str) -> dict:  # type: ignore[type-arg]
+    return {"artifact_id": artifact, "path": path, "value": resolve_path(MODELING[artifact]["data"], path)}
+
+
+def test_observational_causal_claims_must_state_their_assumption() -> None:
+    evidence = [
+        mev("did", "relative_effect"),
+        mev("did", "relative_effect_ci_low"),
+        mev("did", "relative_effect_ci_high"),
+    ]
+    claim = "The program caused a 5.7% increase (95% CI 4.4% to 7.0%)."
+    silent = verify_insight(draft(claim, evidence), MODELING)
+    assert not check(silent, "assumptions_stated").passed
+    stated = verify_insight(
+        draft(claim, evidence, caveats=["Assumes parallel trends between store groups."]), MODELING
+    )
+    assert stated.verified, stated.failures()
+    associational = verify_insight(
+        draft("Program stores grew 5.7% more (95% CI 4.4% to 7.0%).", evidence), MODELING
+    )
+    assert associational.verified, associational.failures()
+
+
+def test_failed_pretrend_blocks_causal_wording() -> None:
+    evidence = [
+        mev("did_bad", "relative_effect"),
+        mev("did_bad", "relative_effect_ci_low"),
+        mev("did_bad", "relative_effect_ci_high"),
+    ]
+    v = verify_insight(
+        draft(
+            "The program caused a 5.7% increase (95% CI 4.4% to 7.0%).",
+            evidence,
+            caveats=["Assumes parallel trends."],
+        ),
+        MODELING,
+    )
+    assert not check(v, "causal_language").passed
+
+
+def test_effect_without_interval_fails() -> None:
+    v = verify_insight(draft("Program stores grew $1,974.80 per week.", [mev("did", "att")]), MODELING)
+    assert not check(v, "interval_reported").passed
+
+
+def test_model_claims_need_holdout_metrics() -> None:
+    train = verify_insight(
+        draft("The model reaches an AUC of 0.981.", [mev("model", "train_metrics.auc")]), MODELING
+    )
+    assert not check(train, "holdout_metrics").passed
+    holdout = verify_insight(
+        draft("The model reaches an AUC of 0.792.", [mev("model", "holdout.auc")]), MODELING
+    )
+    assert holdout.verified, holdout.failures()
+
+
+def test_forecasts_need_their_interval() -> None:
+    point = verify_insight(draft("Expect 16,737 orders.", [mev("fc", "horizon_total.forecast")]), MODELING)
+    assert not check(point, "interval_reported").passed
+    ranged = verify_insight(
+        draft(
+            "Expect 16,737 orders (95% interval 13,222 to 20,395).",
+            [
+                mev("fc", "horizon_total.forecast"),
+                mev("fc", "horizon_total.lower"),
+                mev("fc", "horizon_total.upper"),
+            ],
+        ),
+        MODELING,
+    )
+    assert ranged.verified, ranged.failures()

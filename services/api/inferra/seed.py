@@ -13,7 +13,7 @@ from sqlalchemy import select
 from inferra import storage
 from inferra.auth.accounts import demo_user, demo_workspace
 from inferra.datasources.registry import datasource_for
-from inferra.db.models import Base, Dataset, Insight, Run, Workspace
+from inferra.db.models import Base, Dataset, Insight, Model, Run, Workspace
 from inferra.db.session import get_engine, session_scope
 from inferra.llm.demo_script import demo_script
 from inferra.llm.gateway import set_llm_factory
@@ -37,6 +37,26 @@ DEMO_RUNS = [
         "goal": "Did the new checkout test win? Check conversion, and make sure latency did not get worse.",
         "accept": 1,
     },
+    {
+        "file": "customer_churn.csv",
+        "description": "Subscription customers with plan, tenure, engagement, support, billing, "
+        "and a churn label.",
+        "goal": "Predict which customers are likely to churn and tell me what drives it.",
+        "accept": 0,
+    },
+    {
+        "file": "loyalty_program.csv",
+        "description": "Weekly sales for 60 stores; 24 joined a loyalty program starting the week "
+        "of 2026-04-06.",
+        "goal": "Did the loyalty program increase weekly store sales?",
+        "accept": 0,
+    },
+    {
+        "file": "daily_sales.csv",
+        "description": "Eighteen months of daily orders and revenue.",
+        "goal": "Forecast daily orders for the next four weeks.",
+        "accept": 0,
+    },
 ]
 
 
@@ -58,6 +78,8 @@ def seed_demo(reset: bool = False) -> str:
         if existing is not None:
             for dataset in db.scalars(select(Dataset).where(Dataset.workspace_id == existing.id)):
                 storage.delete_file(dataset.storage_key)
+            for model in db.scalars(select(Model).where(Model.workspace_id == existing.id)):
+                storage.delete_file(model.storage_key)
             db.delete(existing)
             db.flush()
         ws = Workspace(name="Demo · E-commerce", is_demo=True)

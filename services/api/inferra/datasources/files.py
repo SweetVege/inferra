@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+import pandas as pd
 
 from inferra import storage
 from inferra.datasources.base import QueryError, QueryResult, TableInfo
@@ -108,18 +109,22 @@ class FileSource:
         con.execute("SET lock_configuration=true")
         return con
 
-    def query(self, sql: str, limit: int | None = None) -> QueryResult:
+    def _validated(self, con: duckdb.DuckDBPyConnection, sql: str) -> str:
         sql = sql.strip().rstrip(";").strip()
+        try:
+            statements = con.extract_statements(sql)
+        except duckdb.Error as exc:
+            raise QueryError(f"SQL could not be parsed: {exc}") from exc
+        if len(statements) != 1:
+            raise QueryError("Send exactly one SQL statement.")
+        if statements[0].type != duckdb.StatementType.SELECT:
+            raise QueryError("Only read-only SELECT queries are allowed.")
+        return sql
+
+    def query(self, sql: str, limit: int | None = None) -> QueryResult:
         con = self._connect()
         try:
-            try:
-                statements = con.extract_statements(sql)
-            except duckdb.Error as exc:
-                raise QueryError(f"SQL could not be parsed: {exc}") from exc
-            if len(statements) != 1:
-                raise QueryError("Send exactly one SQL statement.")
-            if statements[0].type != duckdb.StatementType.SELECT:
-                raise QueryError("Only read-only SELECT queries are allowed.")
+            sql = self._validated(con, sql)
             try:
                 cursor = con.execute(sql)
                 columns = [d[0] for d in cursor.description or []]
@@ -134,3 +139,15 @@ class FileSource:
             fetched = fetched[:limit]
         rows = [{col: json_safe(val) for col, val in zip(columns, row, strict=True)} for row in fetched]
         return QueryResult(columns=columns, rows=rows, truncated=truncated, sql=sql, types=types)
+
+    def query_frame(self, sql: str) -> "pd.DataFrame":
+        """Run a read-only SELECT and return a DataFrame (for modeling tools that need rows)."""
+        con = self._connect()
+        try:
+            sql = self._validated(con, sql)
+            try:
+                return con.execute(sql).df()
+            except duckdb.Error as exc:
+                raise QueryError(str(exc).split("\n")[0]) from exc
+        finally:
+            con.close()

@@ -1,6 +1,7 @@
 """Generate the deterministic demo datasets in samples/. Run: python scripts/generate_samples.py"""
 
 import csv
+import math
 import random
 from datetime import date, timedelta
 from pathlib import Path
@@ -72,7 +73,83 @@ def checkout_experiment(users: int = 24000) -> None:
         writer.writerows(out)
 
 
+def customer_churn(customers: int = 6000) -> None:
+    """Subscription customers with a churn label driven by engagement, support, and billing issues."""
+    rng = random.Random(11)
+    plans = [("basic", 0.55, 29), ("pro", 0.35, 79), ("enterprise", 0.10, 249)]
+    regions = ["NA", "EU", "APAC", "LATAM"]
+    out = []
+    for i in range(1, customers + 1):
+        plan, _, price = rng.choices(plans, [w for _, w, _ in plans])[0]
+        tenure = max(1, int(rng.expovariate(1 / 18)))
+        logins = max(0, int(rng.gauss(14 if plan != "basic" else 9, 7)))
+        tickets = min(12, int(rng.expovariate(1 / 1.1)))
+        failures = rng.choices([0, 1, 2, 3], [0.82, 0.11, 0.05, 0.02])[0]
+        discount = rng.random() < 0.25
+        spend = round(price * (0.85 if discount else 1) * rng.uniform(0.95, 1.4), 2)
+        nps = None if rng.random() < 0.3 else max(0, min(10, round(rng.gauss(7.5 - 0.4 * tickets, 2))))
+        z = (
+            -1.2 - 0.09 * logins + 0.32 * tickets + 0.9 * failures - 0.035 * tenure
+            + {"basic": 0.4, "pro": 0.0, "enterprise": -0.8}[plan] - (0.15 if discount else 0)
+        )
+        churned = rng.random() < 1 / (1 + math.exp(-z))
+        signup = date(2026, 9, 1) - timedelta(days=30 * tenure + rng.randrange(0, 30))
+        out.append({
+            "customer_id": f"C{i:05d}", "signup_date": signup.isoformat(), "plan": plan,
+            "region": rng.choice(regions), "tenure_months": tenure, "monthly_spend": spend,
+            "logins_30d": logins, "support_tickets_90d": tickets, "payment_failures_90d": failures,
+            "has_discount": str(discount).lower(), "nps": "" if nps is None else nps, "churned": int(churned),
+        })
+    _write("customer_churn.csv", out)
+
+
+def loyalty_program(stores: int = 60, weeks: int = 26, launch_week: int = 13) -> None:
+    """Weekly store sales; 24 stores join a loyalty program at launch_week (difference-in-differences)."""
+    rng = random.Random(23)
+    start = date(2026, 1, 5)
+    regions = ["North", "South", "East", "West"]
+    treated = set(rng.sample(range(1, stores + 1), 24))
+    out = []
+    for s in range(1, stores + 1):
+        base = rng.lognormvariate(10.3, 0.35)
+        region = regions[s % 4]
+        for w in range(weeks):
+            season = 1 + 0.08 * math.sin(w / 4.5) + 0.004 * w
+            effect = 1.06 if (s in treated and w >= launch_week) else 1.0
+            sales = base * season * effect * rng.lognormvariate(0, 0.05)
+            out.append({
+                "store_id": f"S{s:03d}", "region": region, "week_start": (start + timedelta(weeks=w)).isoformat(),
+                "in_program": int(s in treated), "weekly_sales": round(sales, 2),
+            })
+    _write("loyalty_program.csv", out)
+
+
+def daily_sales(days: int = 540) -> None:
+    """Daily orders and revenue with trend, weekly, and yearly seasonality."""
+    rng = random.Random(31)
+    start = date(2025, 3, 1)
+    out = []
+    for d in range(days):
+        day = start + timedelta(days=d)
+        weekly = [0.92, 0.95, 0.97, 1.0, 1.08, 1.18, 0.9][day.weekday()]
+        yearly = 1 + 0.12 * math.sin(2 * math.pi * (day.timetuple().tm_yday - 80) / 365)
+        orders = max(0, round(420 * (1 + 0.0007 * d) * weekly * yearly * rng.lognormvariate(0, 0.06)))
+        out.append({"date": day.isoformat(), "orders": orders,
+                    "revenue": round(orders * rng.lognormvariate(4.05, 0.03), 2)})
+    _write("daily_sales.csv", out)
+
+
+def _write(name: str, rows: list[dict]) -> None:
+    with (OUT / name).open("w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
     ecommerce_orders()
     checkout_experiment()
+    customer_churn()
+    loyalty_program()
+    daily_sales()
