@@ -34,7 +34,23 @@ SPECIALISTS: dict[str, AgentSpec] = {
         "analyst",
         "Analyst Agent",
         prompts.ANALYST_AGENT,
-        ("list_tables", "run_sql", "summarize_column", "group_summary", "correlations"),
+        (
+            "list_tables",
+            "run_sql",
+            "summarize_column",
+            "group_summary",
+            "correlations",
+            "fit_regression",
+            "diff_in_diff",
+            "propensity_match",
+            "forecast",
+        ),
+    ),
+    "ml": AgentSpec(
+        "ml",
+        "ML Agent",
+        prompts.ML_AGENT,
+        ("list_tables", "summarize_column", "run_sql", "correlations", "train_model"),
     ),
     "experiment": AgentSpec(
         "experiment",
@@ -151,6 +167,12 @@ def _execute(tool, use, step, spec, ctx, rec, produced) -> dict[str, Any]:  # ty
         )
         return _error(use.id, str(exc))
     artifact_id = None
+    if output.model is not None:
+        model_id = rec.model(output.model)
+        if output.artifact is not None:
+            output.artifact.data["model_id"] = model_id
+        if isinstance(output.result, dict):
+            output.result["model_id"] = model_id
     if output.artifact is not None:
         artifact = rec.artifact(step, output.artifact)
         artifact_id = artifact.id

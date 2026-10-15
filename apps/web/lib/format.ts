@@ -2,6 +2,8 @@ export function formatNumber(value: unknown, maxDigits = 2): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return value == null ? "—" : String(value);
   const abs = Math.abs(value);
   if (Number.isInteger(value)) return value.toLocaleString("en-US");
+  // Keep tiny values (p-values, losses) visible instead of rounding them to 0.
+  if (abs > 0 && abs < 0.001) return value.toExponential(1);
   if (abs >= 1000) return value.toLocaleString("en-US", { maximumFractionDigits: 0 });
   return value.toLocaleString("en-US", { maximumFractionDigits: abs < 1 ? Math.max(maxDigits, 3) : maxDigits });
 }

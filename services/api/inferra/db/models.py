@@ -82,6 +82,25 @@ class Dataset(TimestampMixin, Base):
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
 
+class Model(TimestampMixin, Base):
+    """A trained predictive model in the workspace registry."""
+
+    __tablename__ = "models"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"))
+    name: Mapped[str] = mapped_column(String(200))
+    task: Mapped[str] = mapped_column(String(30))  # classification | regression
+    target: Mapped[str] = mapped_column(String(200))
+    source_table: Mapped[str] = mapped_column(String(100))
+    features: Mapped[list[Any]] = mapped_column(default=list)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    card: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    storage_key: Mapped[str] = mapped_column(String(500))
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+
 class Run(TimestampMixin, Base):
     """One natural-language goal and everything the agents did for it."""
 

@@ -26,10 +26,25 @@ class ArtifactDraft:
 
 
 @dataclass
+class ModelDraft:
+    """A trained model for the registry: metadata plus a serialized, self-contained payload."""
+
+    name: str
+    task: str
+    target: str
+    table: str
+    features: list[str]
+    metrics: dict[str, Any]
+    card: dict[str, Any]
+    payload: str
+
+
+@dataclass
 class ToolOutput:
     result: Any  # compact JSON-able payload the agent reads
     artifact: ArtifactDraft | None = None
     code: str | None = None  # SQL (or equivalent) that produced the result
+    model: ModelDraft | None = None
 
 
 @dataclass
@@ -85,7 +100,7 @@ def get_tools(names: list[str]) -> list[Tool]:
 
 def _load_all() -> None:
     # Importing the modules registers their tools.
-    from inferra.tools import analysis, experiment, profiling  # noqa: F401
+    from inferra.tools import analysis, experiment, ml, modeling, profiling  # noqa: F401
 
 
 def round_floats(value: Any, digits: int = 8) -> Any:

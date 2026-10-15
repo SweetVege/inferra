@@ -175,26 +175,101 @@ WORKFLOWS: dict[str, Workflow] = {
         Workflow(
             intent="estimate_effect",
             title="Estimate an effect from observational data",
-            description="Regression, difference-in-differences, or propensity matching.",
-            examples=("Did the loyalty program increase spend?",),
-            available=False,
-            phase="Phase 2",
+            description="Difference-in-differences, matching, or regression, with assumption checks.",
+            examples=(
+                "Did the loyalty program increase store sales?",
+                "What is the effect of discounts on churn, controlling for plan and tenure?",
+            ),
+            params=(
+                Param(
+                    "treatment",
+                    "The intervention or exposure column, or how treatment is defined.",
+                    required=True,
+                ),
+                Param("outcome", "The outcome column.", required=True),
+                Param(
+                    "method",
+                    "diff_in_diff when there is a panel with a known start date; propensity_match for a "
+                    "one-time treatment with pre-treatment covariates; regression otherwise.",
+                ),
+                Param("unit_column", "Unit identifier for panel data."),
+                Param("time_column", "Period column for panel data."),
+                Param("post_start", "First treated period for difference-in-differences."),
+                Param("covariates", "Comma-separated pre-treatment variables to control for."),
+            ),
+            steps=(
+                StepTemplate(
+                    "prepare",
+                    "data",
+                    "Check the data for estimating the effect of {treatment} on {outcome}: treatment and "
+                    "outcome definitions, unit and time structure ({unit_column}, {time_column}), and "
+                    "whether covariates ({covariates}) are measured before treatment.",
+                ),
+                StepTemplate(
+                    "estimate",
+                    "analyst",
+                    "Estimate the effect of {treatment} on {outcome} using {method} (post_start: "
+                    "{post_start}; covariates: {covariates}). Check the method's assumptions (pre-trends "
+                    "or covariate balance) and run a simpler cross-check.",
+                    depends_on=("prepare",),
+                ),
+                StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("prepare", "estimate")),
+            ),
         ),
         Workflow(
             intent="predict",
             title="Build a predictive model",
-            description="Train, evaluate, and explain a classification or regression model.",
-            examples=("Predict which customers will churn.",),
-            available=False,
-            phase="Phase 2",
+            description="Train, evaluate, explain, and register a classification or regression model.",
+            examples=("Predict which customers will churn.", "Which customers are most likely to upgrade?"),
+            params=(
+                Param("target", "Column to predict.", required=True),
+                Param("features", "Comma-separated columns to use; empty means all eligible columns."),
+                Param("population", "Optional filter describing the rows to model."),
+            ),
+            steps=(
+                StepTemplate(
+                    "prepare",
+                    "data",
+                    "Check that '{target}' is a usable label (type, missing values, class balance) and flag "
+                    "columns that could leak the outcome (recorded after it). Population: {population}.",
+                ),
+                StepTemplate(
+                    "train",
+                    "ml",
+                    "Train and evaluate a model for '{target}' (features: {features}; population: "
+                    "{population}). Compare against the baseline and explain the main drivers.",
+                    depends_on=("prepare",),
+                ),
+                StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("prepare", "train")),
+            ),
         ),
         Workflow(
             intent="forecast",
             title="Forecast a time series",
-            description="Forecast a metric with prediction intervals.",
-            examples=("Forecast next month's orders.",),
-            available=False,
-            phase="Phase 2",
+            description="Forecast a metric with prediction intervals and a backtest against a naive model.",
+            examples=("Forecast daily orders for the next four weeks.", "What will revenue be next quarter?"),
+            params=(
+                Param("metric", "Column to forecast, or 'rows' to count records.", required=True),
+                Param("date_column", "Date column.", required=True),
+                Param("freq", "day, week, or month."),
+                Param("horizon", "Number of periods ahead."),
+            ),
+            steps=(
+                StepTemplate(
+                    "prepare",
+                    "data",
+                    "Check the history of '{metric}' over '{date_column}': coverage, gaps, partial "
+                    "periods, and outliers that could distort a forecast.",
+                ),
+                StepTemplate(
+                    "forecast",
+                    "analyst",
+                    "Forecast '{metric}' by {freq} for {horizon} periods with prediction intervals, and "
+                    "report how the model did in the backtest compared with the seasonal-naive baseline.",
+                    depends_on=("prepare",),
+                ),
+                StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("prepare", "forecast")),
+            ),
         ),
         Workflow(
             intent="model_data",

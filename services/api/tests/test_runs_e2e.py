@@ -162,24 +162,26 @@ def test_roadmap_intents_are_reported_not_improvised(client: TestClient, orders_
 
     def script(req: Request) -> list[Any]:
         return [
-            TextBlock("This is a churn model."),
+            TextBlock("This is a data modeling request."),
             ToolUseBlock(
                 "submit_plan",
                 {
-                    "intent": "predict",
+                    "intent": "model_data",
                     "dataset_ids": [dataset["id"]],
                     "params": [],
-                    "rationale": "Prediction request.",
+                    "rationale": "Star schema request.",
                     "confidence": "high",
                 },
             ),
         ]
 
     use_llm(script)
-    run = client.post(f"/api/workspaces/{ws}/runs", json={"goal": "Predict churn"}).json()
+    run = client.post(
+        f"/api/workspaces/{ws}/runs", json={"goal": "Design a star schema for these tables"}
+    ).json()
     drain()
     run = client.get(f"/api/workspaces/{ws}/runs/{run['id']}").json()
-    assert run["status"] == "unsupported" and "Phase 2" in run["error"]
+    assert run["status"] == "unsupported" and "Phase 4" in run["error"]
 
 
 def test_invalid_plans_are_sent_back_to_the_orchestrator(client: TestClient, orders_csv: Path) -> None:
@@ -383,3 +385,64 @@ def test_experiment_design_end_to_end(client: TestClient) -> None:
     assert {t["tool"] for t in run["tool_calls"]} >= {"metric_baseline", "power_analysis"}
     insight = run["insights"][0]
     assert insight["verified"], insight["checks"]
+
+
+SAMPLES_DIR = Path(__file__).resolve().parents[3] / "samples"
+
+
+def test_predict_run_registers_a_model_that_scores_datasets(client: TestClient) -> None:
+    ws = login(client)
+    dataset = upload(client, ws, SAMPLES_DIR / "customer_churn.csv")
+    use_llm(demo_script)
+    client.patch(f"/api/workspaces/{ws}", json={"auto_approve_plans": True})
+    run = client.post(
+        f"/api/workspaces/{ws}/runs", json={"goal": "Predict which customers will churn"}
+    ).json()
+    drain()
+    run = client.get(f"/api/workspaces/{ws}/runs/{run['id']}").json()
+    assert run["status"] == "completed", run["error"]
+    assert [s["agent"] for s in run["steps"]] == ["data", "ml", "insight"]
+    assert all(i["verified"] for i in run["insights"]), [i["checks"] for i in run["insights"]]
+    model_artifact = next(a for a in run["artifacts"] if a["kind"] == "model")
+
+    models = client.get(f"/api/workspaces/{ws}/models").json()
+    assert len(models) == 1 and models[0]["id"] == model_artifact["data"]["model_id"]
+    detail = client.get(f"/api/workspaces/{ws}/models/{models[0]['id']}").json()
+    assert detail["card"]["target"] == "churned" and detail["card"]["limitations"]
+
+    scored = client.post(
+        f"/api/workspaces/{ws}/models/{models[0]['id']}/score", json={"dataset_id": dataset["id"]}
+    )
+    assert scored.status_code == 201, scored.text
+    scored = scored.json()
+    assert scored["row_count"] == 6000
+    assert "churned_probability" in [c["name"] for c in scored["columns"]]
+
+    other = upload(client, ws, SAMPLES_DIR / "daily_sales.csv")
+    bad = client.post(
+        f"/api/workspaces/{ws}/models/{models[0]['id']}/score", json={"dataset_id": other["id"]}
+    )
+    assert bad.status_code == 400 and "missing model features" in bad.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("file", "goal", "intent"),
+    [
+        ("loyalty_program.csv", "Did the loyalty program increase weekly sales?", "estimate_effect"),
+        ("daily_sales.csv", "Forecast daily orders for the next four weeks", "forecast"),
+    ],
+)
+def test_modeling_runs_end_to_end(client: TestClient, file: str, goal: str, intent: str) -> None:
+    ws = login(client)
+    upload(client, ws, SAMPLES_DIR / file)
+    use_llm(demo_script)
+    client.patch(f"/api/workspaces/{ws}", json={"auto_approve_plans": True})
+    run = client.post(f"/api/workspaces/{ws}/runs", json={"goal": goal}).json()
+    drain()
+    run = client.get(f"/api/workspaces/{ws}/runs/{run['id']}").json()
+    assert run["status"] == "completed", run["error"]
+    assert run["intent"] == intent
+    assert [s["agent"] for s in run["steps"]] == ["data", "analyst", "insight"]
+    assert run["insights"] and all(i["verified"] for i in run["insights"]), [
+        i["checks"] for i in run["insights"]
+    ]
