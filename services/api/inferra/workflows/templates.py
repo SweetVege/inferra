@@ -329,14 +329,38 @@ WORKFLOWS: dict[str, Workflow] = {
         ),
         Workflow(
             intent="monitor",
-            title="Monitor a metric on a schedule",
-            description="Re-run a check every day or week and alert when a metric moves unexpectedly.",
+            title="Monitor a metric",
+            description="Check a metric against its recent baseline and alert when it moves beyond a "
+            "threshold. Once the plan runs, Inferra re-runs it daily or weekly and raises alerts in the app.",
             examples=(
                 "Alert me when conversion drops.",
                 "Check revenue every Monday and tell me if it is off.",
             ),
-            available=False,
-            phase="a future release",
+            params=(
+                Param("metric", "A defined metric name, or the measure in plain words.", required=True),
+                Param("cadence", "daily or weekly (default weekly): how often to check and what period."),
+                Param("direction", "down, up, or both (default both): which moves should alert."),
+                Param("threshold", "Relative change that alerts, as a fraction (0.1 = 10%). Default 0.1."),
+                Param("dimensions", "Comma-separated columns to break an alerting change down by."),
+            ),
+            steps=(
+                StepTemplate(
+                    "check",
+                    "data",
+                    "Confirm '{metric}' is defined or computable, and check that the latest {cadence} "
+                    "period is complete and that volumes look normal, since broken tracking would look "
+                    "like a metric move.",
+                ),
+                StepTemplate(
+                    "watch",
+                    "analyst",
+                    "Run check_metric for '{metric}' per {cadence} period against its trailing baseline, "
+                    "alerting on a {direction} move beyond a relative change of {threshold}. If it alerts, "
+                    "decompose the change between the baseline and the latest period across {dimensions}.",
+                    depends_on=("check",),
+                ),
+                StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("check", "watch")),
+            ),
         ),
     ]
 }

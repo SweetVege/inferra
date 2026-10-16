@@ -14,7 +14,7 @@ from inferra.api.schemas import (
     RunSummary,
 )
 from inferra.auth.session import WorkspaceAccess, workspace_access
-from inferra.db.models import Artifact, Dataset, Insight, Run, RunEvent, ToolCall
+from inferra.db.models import Alert, Artifact, Dataset, Insight, Run, RunEvent, Schedule, ToolCall
 from inferra.db.session import get_db
 from inferra.llm.gateway import llm_available
 from inferra.runtime.queue import enqueue
@@ -31,6 +31,8 @@ def _run(db: Session, access: WorkspaceAccess, run_id: str) -> Run:
 
 
 def run_detail(db: Session, run: Run) -> RunDetail:
+    from inferra.api.schedules import schedule_out
+
     def rows(model, order):  # type: ignore[no-untyped-def]
         return list(db.scalars(select(model).where(model.run_id == run.id).order_by(order)))
 
@@ -50,8 +52,14 @@ def run_detail(db: Session, run: Run) -> RunDetail:
                     "usage",
                     "created_at",
                     "updated_at",
+                    "schedule_id",
                 )
             },
+            "schedules": [
+                schedule_out(db, s, with_runs=False)
+                for s in db.scalars(select(Schedule).where(Schedule.source_run_id == run.id))
+            ],
+            "alerts": rows(Alert, Alert.created_at),
             "steps": run.steps,
             "tool_calls": rows(ToolCall, ToolCall.created_at),
             "artifacts": rows(Artifact, Artifact.created_at),
@@ -212,7 +220,7 @@ def insight_feed(
         .where(Run.workspace_id == access.workspace.id)
     )
     if status:
-        query = query.where(Insight.status == status)
+        query = query.where(Insight.status.in_(status.split(",")))
     if verified is not None:
         query = query.where(Insight.verified.is_(verified))
     rows = db.execute(query.order_by(Insight.created_at.desc(), Insight.position).limit(200)).all()

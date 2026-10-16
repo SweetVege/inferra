@@ -3,14 +3,14 @@
 import { DataModelArtifact, KeysView, RelationshipsView } from "@/components/data-model-views";
 import { DataTable } from "@/components/data-table";
 import { AbTestView, BaselineView, BayesianView, PowerView, SegmentView, SequentialView, SrmView } from "@/components/experiment-views";
-import { AnomalyView, DecompositionView, MetricView } from "@/components/metric-views";
+import { AnomalyView, DecompositionView, MetricCheckView, MetricView } from "@/components/metric-views";
 import { DidView, ForecastView, ModelView, PsmView, RegressionView } from "@/components/modeling-views";
 import { Findings } from "@/components/profile-view";
 import { CodeBlock } from "@/components/ui";
 import { formatNumber } from "@/lib/format";
 import type { Artifact, BuildResult, Finding } from "@/lib/types";
 
-export function ArtifactView({ artifact }: { artifact: Artifact }) {
+export function ArtifactView({ artifact }: { artifact: Pick<Artifact, "kind" | "data"> }) {
   const d = artifact.data as Record<string, unknown>;
   if (artifact.kind === "table") {
     return (
@@ -51,6 +51,7 @@ export function ArtifactView({ artifact }: { artifact: Artifact }) {
   if (artifact.kind === "baseline") return <BaselineView d={d} />;
   if (artifact.kind === "metric") return <MetricView d={d} />;
   if (artifact.kind === "anomalies") return <AnomalyView d={d} />;
+  if (artifact.kind === "metric_check") return <MetricCheckView d={d} />;
   if (artifact.kind === "decomposition") return <DecompositionView d={d} />;
   if (artifact.kind === "regression") return <RegressionView d={d} />;
   if (artifact.kind === "did") return <DidView d={d} />;

@@ -49,7 +49,10 @@ export default function RunsPage() {
                       {r.goal}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-ink-2">{r.intent ? titleCase(r.intent) : "—"}</td>
+                  <td className="px-4 py-3 text-ink-2">
+                    {r.intent ? titleCase(r.intent) : "—"}
+                    {r.schedule_id && <span className="block text-xs text-ink-3">Scheduled re-run</span>}
+                  </td>
                   <td className="px-4 py-3">
                     <RunStatusBadge status={r.status} />
                   </td>

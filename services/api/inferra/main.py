@@ -4,7 +4,18 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 
-from inferra.api import auth, connections, data_models, datasets, metrics, models, runs, workspaces
+from inferra.api import (
+    auth,
+    connections,
+    data_models,
+    datasets,
+    metrics,
+    models,
+    reports,
+    runs,
+    schedules,
+    workspaces,
+)
 from inferra.config import get_settings
 from inferra.db.models import Base
 from inferra.db.session import get_engine
@@ -32,8 +43,11 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    for module in (auth, workspaces, datasets, runs, models, metrics, connections, data_models):
+    modules = (auth, workspaces, datasets, runs, models, metrics, connections, data_models)
+    modules += (reports, schedules)
+    for module in modules:
         api.include_router(module.router)
+    api.include_router(reports.public_router)
     app.include_router(api)
     return app
 

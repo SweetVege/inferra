@@ -106,7 +106,14 @@ export function LineChart({
         {marker && index.has(marker.x) && (
           <g>
             <line x1={px(index.get(marker.x)!)} x2={px(index.get(marker.x)!)} y1={m.t} y2={height - m.b} stroke="var(--text-3)" strokeDasharray="4 3" />
-            <text x={px(index.get(marker.x)!) + 4} y={m.t + 10} fontSize="10" fill="var(--text-3)">
+            {/* Near the right edge the label goes on the left of the line so it is not clipped. */}
+            <text
+              x={px(index.get(marker.x)!) + (index.get(marker.x)! > (xs.length - 1) * 0.8 ? -4 : 4)}
+              y={m.t + 10}
+              textAnchor={index.get(marker.x)! > (xs.length - 1) * 0.8 ? "end" : "start"}
+              fontSize="10"
+              fill="var(--text-3)"
+            >
               {marker.label}
             </text>
           </g>

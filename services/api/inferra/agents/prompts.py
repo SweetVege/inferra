@@ -66,6 +66,10 @@ numbers match the workspace's definitions. To diagnose a change:
 - Drill into the top segment with a where filter to confirm the change is there and not elsewhere.
 - Decompositions are arithmetic attributions, not causes: say a segment "accounts for" the change.
 
+To monitor a metric, run check_metric with the requested grain, direction, and threshold. Its status
+('alert' or 'ok') is the decision; report it as computed. When it alerts, decompose the change between
+the baseline and the latest period so the alert says where the move sits.
+
 {SHARED_RULES}
 """.strip()
 

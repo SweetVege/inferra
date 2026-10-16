@@ -417,3 +417,119 @@ def decompose_change(ctx: ToolContext, args: DecomposeInput) -> ToolOutput:
         artifact=ArtifactDraft("decomposition", f"What moved {m.label or m.name}", data),
         code=f"-- {data['method']} of {m.name} across {', '.join(args.dimensions)}",
     )
+
+
+class CheckInput(MetricRef):
+    grain: Literal["day", "week"] = Field(default="week", description="Check daily or weekly values.")
+    baseline_periods: int = Field(
+        default=8, ge=3, le=52, description="Complete periods before the latest one used as the baseline."
+    )
+    direction: Literal["down", "up", "both"] = Field(default="both", description="Which moves to alert on.")
+    threshold: float = Field(
+        default=0.1, gt=0, le=5, description="Relative change against the baseline that alerts (0.1 = 10%)."
+    )
+    where: str | None = None
+
+
+def _period_end(start: str, grain: str) -> str:
+    import datetime as dt
+
+    day = dt.date.fromisoformat(start)
+    return (day + dt.timedelta(days=6 if grain == "week" else 0)).isoformat()
+
+
+@tool(
+    "check_metric",
+    "Monitor a metric: compare its latest complete day or week with the trailing baseline and decide "
+    "whether to alert. The baseline is the median of the previous periods, with a normal range of three "
+    "robust standard deviations (from the MAD), so a recent shift does not hide itself. It alerts when "
+    "the change against the median exceeds the threshold in the watched direction AND falls outside the "
+    "normal range. A partial latest period is left out. Creates a 'metric_check' artifact with status "
+    "'alert' or 'ok'.",
+    CheckInput,
+)
+def check_metric(ctx: ToolContext, args: CheckInput) -> ToolOutput:
+    m = args.resolve(ctx)
+    if not m.time_column:
+        raise ToolError("This metric has no time column, so it cannot be monitored over time.")
+    q = ctx.source.quote
+    conds = [args.where] if args.where else []
+    rows, sql = run_metric(ctx, m, grain=args.grain, conditions=conds, limit=2000)
+    day = f"CAST({q(m.time_column)} AS DATE)"
+    last_day_sql = f"SELECT max({day})::VARCHAR AS last_day FROM {q(m.table)} {_conditions(m, *conds)}"
+    try:
+        last_day = ctx.source.query(last_day_sql).rows[0]["last_day"]
+    except QueryError as exc:
+        raise ToolError(str(exc)) from exc
+    rows = [r for r in rows if r["value"] is not None]
+    excluded = None
+    if rows and last_day and _period_end(str(rows[-1]["period"]), args.grain) > str(last_day):
+        excluded = rows[-1]["period"]
+        rows = rows[:-1]
+    if len(rows) < args.baseline_periods + 1:
+        raise ToolError(
+            f"Need {args.baseline_periods + 1} complete {args.grain}s; found {len(rows)}. "
+            "Use a smaller baseline_periods."
+        )
+    latest, history = rows[-1], rows[-1 - args.baseline_periods : -1]
+    values = np.array([float(r["value"]) for r in history])
+    # Median and MAD rather than mean and SD: if the shift began inside the baseline window, the
+    # changed periods would otherwise pull the expectation toward them and widen the range.
+    median = float(np.median(values))
+    spread = float(np.median(np.abs(values - median))) * 1.4826 or float(values.std(ddof=1))
+    low, high = median - 3 * spread, median + 3 * spread
+    value = float(latest["value"])
+    change = value - median
+    relative = change / median if median else None
+    z = change / spread if spread > 0 else None
+    moved = relative is not None and (
+        (args.direction in {"down", "both"} and relative <= -args.threshold)
+        or (args.direction in {"up", "both"} and relative >= args.threshold)
+    )
+    outside = value < low or value > high
+    alert = bool(moved and outside)
+    label = m.label or m.name
+    if alert:
+        reason = (
+            f"{label} moved {relative:+.1%} against its {len(values)}-{args.grain} median, beyond the "
+            f"{args.threshold:.0%} threshold and outside the normal range."
+        )
+    elif moved:
+        reason = f"{label} moved {relative:+.1%}, but stays within the baseline's normal range."
+    else:
+        reason = f"{label} is within {args.threshold:.0%} of its {len(values)}-{args.grain} median."
+    data = round_floats(
+        {
+            "design": "descriptive",
+            "metric": _describe(m),
+            "grain": args.grain,
+            "direction": args.direction,
+            "threshold": args.threshold,
+            "status": "alert" if alert else "ok",
+            "alert": alert,
+            "reason": reason,
+            "latest": {**latest, "end": _period_end(str(latest["period"]), args.grain)},
+            "baseline": {
+                "start": history[0]["period"],
+                "end": _period_end(str(history[-1]["period"]), args.grain),
+                "periods": len(values),
+                "median": median,
+                "mean": float(values.mean()),
+                "robust_std": spread,
+                "low": low,
+                "high": high,
+            },
+            "change": change,
+            "relative_change": relative,
+            "z_score": z,
+            "excluded_partial_period": excluded,
+            "series": [
+                {"period": r["period"], "value": r["value"]} for r in rows[-(args.baseline_periods + 13) :]
+            ],
+        }
+    )
+    return ToolOutput(
+        result={**data, "series": data["series"][-(args.baseline_periods + 1) :]},
+        artifact=ArtifactDraft("metric_check", f"Check of {label} per {args.grain}", data),
+        code=sql,
+    )
