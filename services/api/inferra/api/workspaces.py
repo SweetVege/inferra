@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from inferra.api.schemas import WorkspaceOut, WorkspaceUpdate
 from inferra.auth.session import WorkspaceAccess, current_user, workspace_access
-from inferra.db.models import Membership, User
+from inferra.db.models import Alert, Dataset, Insight, Membership, Report, Run, Schedule, User
 from inferra.db.session import get_db
 from inferra.llm.gateway import llm_available
 from inferra.workflows.templates import WORKFLOWS
@@ -40,6 +40,32 @@ def update_workspace(
         ws.auto_approve_plans = body.auto_approve_plans
     db.commit()
     return _out(access.role, ws)
+
+
+@router.get("/workspaces/{workspace_id}/overview")
+def overview(access: WorkspaceAccess = Depends(workspace_access), db: Session = Depends(get_db)) -> dict:  # type: ignore[type-arg]
+    """Counts behind the getting-started checklist and the navigation badges."""
+    ws = access.workspace.id
+
+    def count(query) -> int:  # type: ignore[no-untyped-def]
+        return db.scalar(select(func.count()).select_from(query.subquery())) or 0
+
+    return {
+        "datasets": count(select(Dataset.id).where(Dataset.workspace_id == ws)),
+        "runs": count(select(Run.id).where(Run.workspace_id == ws)),
+        "completed_runs": count(select(Run.id).where(Run.workspace_id == ws, Run.status == "completed")),
+        "reviewed_insights": count(
+            select(Insight.id)
+            .join(Run, Run.id == Insight.run_id)
+            .where(Run.workspace_id == ws, Insight.status != "draft")
+        ),
+        "reports": count(select(Report.id).where(Report.workspace_id == ws)),
+        "published_reports": count(
+            select(Report.id).where(Report.workspace_id == ws, Report.published_at.is_not(None))
+        ),
+        "schedules": count(select(Schedule.id).where(Schedule.workspace_id == ws)),
+        "open_alerts": count(select(Alert.id).where(Alert.workspace_id == ws, Alert.status == "open")),
+    }
 
 
 @router.get("/meta")

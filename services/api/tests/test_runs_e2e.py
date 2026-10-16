@@ -156,19 +156,28 @@ def test_clarification_round_trip(client: TestClient, orders_csv: Path) -> None:
     assert run["status"] == "awaiting_approval"
 
 
-def test_roadmap_intents_are_reported_not_improvised(client: TestClient, orders_csv: Path) -> None:
+def test_roadmap_intents_are_reported_not_improvised(
+    client: TestClient, orders_csv: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dataclasses
+
+    from inferra.workflows.templates import WORKFLOWS
+
+    # Every intent ships today; mark one as upcoming to check the roadmap path still holds.
+    upcoming = dataclasses.replace(WORKFLOWS["monitor"], available=False, phase="a future release")
+    monkeypatch.setitem(WORKFLOWS, "monitor", upcoming)
     ws = login(client)
     dataset = upload(client, ws, orders_csv)
 
     def script(req: Request) -> list[Any]:
         return [
-            TextBlock("This is a data modeling request."),
+            TextBlock("This is a monitoring request."),
             ToolUseBlock(
                 "submit_plan",
                 {
                     "intent": "monitor",
                     "dataset_ids": [dataset["id"]],
-                    "params": [],
+                    "params": [{"name": "metric", "value": "revenue"}],
                     "rationale": "A recurring alert request.",
                     "confidence": "high",
                 },

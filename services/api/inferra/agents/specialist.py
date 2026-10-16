@@ -53,6 +53,7 @@ SPECIALISTS: dict[str, AgentSpec] = {
             "compute_metric",
             "detect_anomalies",
             "decompose_change",
+            "check_metric",
             "fit_regression",
             "diff_in_diff",
             "propensity_match",

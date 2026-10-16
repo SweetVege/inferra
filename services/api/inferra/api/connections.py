@@ -164,6 +164,33 @@ def create_extract(
     return dataset_out(dataset)
 
 
+def refresh_dataset(db: Session, dataset: Dataset, user_id: str | None) -> None:
+    """Re-pull an extract from its connection, or rebuild a published data model node.
+    Raises QueryError when the source cannot be read."""
+    if dataset.data_model_id and dataset.source_query:
+        from inferra.api.data_models import publish_nodes
+        from inferra.db.models import DataModel
+
+        model = db.get(DataModel, dataset.data_model_id)
+        if model is None:
+            raise QueryError("The data model behind this dataset was deleted.")
+        publish_nodes(db, model, [dataset.source_query], user_id)
+        db.refresh(dataset)
+        return
+    conn = db.get(Connection, dataset.connection_id) if dataset.connection_id else None
+    if conn is None or not dataset.source_query:
+        raise QueryError("Only extracts and published data model nodes can be refreshed.")
+    rows, columns = _run_extract(conn, json.loads(dataset.source_query), dataset.storage_key)
+    dataset.row_count, dataset.columns = rows, columns
+    dataset.profile = None
+    dataset.synced_at = datetime.now(UTC)
+    db.commit()
+
+
+def refreshable(dataset: Dataset) -> bool:
+    return bool(dataset.source_query and (dataset.data_model_id or dataset.connection_id))
+
+
 @router.post("/datasets/{dataset_id}/refresh", response_model=DatasetOut)
 def refresh_extract(
     dataset_id: str, access: WorkspaceAccess = Depends(workspace_access), db: Session = Depends(get_db)
@@ -172,27 +199,10 @@ def refresh_extract(
     dataset = db.get(Dataset, dataset_id)
     if dataset is None or dataset.workspace_id != access.workspace.id:
         raise HTTPException(404, "Dataset not found.")
-    if dataset.data_model_id and dataset.source_query:
-        from inferra.api.data_models import publish_nodes
-        from inferra.db.models import DataModel
-
-        model = db.get(DataModel, dataset.data_model_id)
-        if model is None:
-            raise HTTPException(400, "The data model behind this dataset was deleted.")
-        publish_nodes(db, model, [dataset.source_query], access.user.id)
-        db.refresh(dataset)
-        return dataset_out(dataset)
-    if not dataset.connection_id or not dataset.source_query:
-        raise HTTPException(400, "Only extracts and published data model nodes can be refreshed.")
-    conn = _get(db, access, dataset.connection_id)
     try:
-        rows, columns = _run_extract(conn, json.loads(dataset.source_query), dataset.storage_key)
+        refresh_dataset(db, dataset, access.user.id)
     except QueryError as exc:
         raise HTTPException(400, str(exc)) from exc
-    dataset.row_count, dataset.columns = rows, columns
-    dataset.profile = None
-    dataset.synced_at = datetime.now(UTC)
-    db.commit()
     return dataset_out(dataset)
 
 

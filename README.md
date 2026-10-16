@@ -11,13 +11,15 @@
 3. **Run.** Specialist agents call typed tools against a sandboxed DuckDB: profiling and read-only SQL; A/B test design and analysis (power, SRM, CUPED, segments, Bayesian and sequential reads); regression, difference-in-differences, propensity matching, and forecasting; model training that compares gradient-boosted trees with a linear baseline, explains predictions with SHAP, and registers the winner for batch scoring; and dimensional modeling that finds a table's grain and entities, builds a tested star schema, and exports it as a dbt project. Every tool call is logged with its inputs, SQL, and output.
 4. **Verify.** The Insight Agent drafts findings that cite artifact values. A deterministic verifier checks that every number matches a cited value, blocks causal wording without a randomized or causal design, caps confidence on small samples, requires intervals with every estimate and forecast, requires observational causal claims to state their assumption, insists on held-out model metrics, refuses effect claims from tests that failed their sample ratio check, and makes failing data-model tests visible. Failed drafts go back for revision; drafts that still fail are flagged, not hidden.
 5. **Review.** You accept, edit, or reject each insight.
+6. **Share and monitor.** Reviewed insights become a report with charts and a method appendix, published as a frozen version and shareable by a revocable link that needs no account. Any completed run can re-run daily or weekly on the plan you approved, and a monitor ("Alert me when conversion drops") raises an in-app alert when its metric check crosses the threshold.
 
 ```mermaid
 flowchart LR
   G["Goal (plain English)"] --> O["Orchestrator<br/>intent + plan"]
   O -->|approved| D["Data Agent"] --> S["Analyst, Experiment,<br/>ML Agent, or Data Modeler"] --> I["Insight Agent"]
   D & S --> T["Typed tools<br/>DuckDB · scipy · statsmodels · LightGBM"]
-  I --> V["Verifier<br/>(deterministic)"] --> R["Human review"]
+  I --> V["Verifier<br/>(deterministic)"] --> R["Human review"] --> P["Report<br/>(shareable link)"]
+  R -. schedule .-> O
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/PRD.md](docs/PRD.md) for scope and roadmap.
@@ -31,6 +33,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/PRD.md
 | 2. Modeling Studio | Regression, difference-in-differences, propensity matching, Holt-Winters forecasting, ML with model selection, SHAP, model cards, registry, and batch scoring | Done |
 | 3. Analysis + Postgres | Metric layer, anomaly and change-point detection, exact mix/rate decomposition of metric changes, Postgres extracts, insight feed | Done |
 | 4. Data Modeling + Warehouses | Key and entity discovery, star-schema design, SQL transforms with tests and lineage, publishing as datasets, dbt export; BigQuery and Snowflake extracts | Done |
+| 5. Reports & polish | Shareable reports (publish snapshots, public links), scheduled re-runs, metric monitors with alerts, getting-started checklist and demo tour | Done |
 
 ## Run it locally
 

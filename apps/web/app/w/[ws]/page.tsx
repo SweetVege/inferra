@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { Onboarding } from "@/components/onboarding";
 import { canEdit, useSession, useWorkspace } from "@/components/session";
 import { AGENTS, AgentAvatar, Badge, Card, cx, EmptyState, ErrorBanner, RunStatusBadge, SectionTitle, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -18,6 +19,7 @@ const SUGGESTIONS = [
   "Did the loyalty program increase weekly store sales?",
   "Forecast daily orders for the next four weeks.",
   "Turn the order lines export into a star schema we can use for reporting.",
+  "Alert me every Monday if weekly signup conversion drops more than 10%.",
 ];
 
 export default function AskPage() {
@@ -68,6 +70,8 @@ export default function AskPage() {
           Describe your goal in plain English. Inferra plans the work, runs it with a team of agents, and brings back insights you can verify.
         </p>
       </header>
+
+      <Onboarding workspace={workspace} />
 
       <form onSubmit={submit} className="space-y-3">
         <Card className="p-2 focus-within:border-accent">

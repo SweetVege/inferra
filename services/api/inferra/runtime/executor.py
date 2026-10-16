@@ -20,6 +20,7 @@ from inferra.llm.gateway import LLMUnavailable, get_llm
 from inferra.metrics_layer import metric_specs
 from inferra.runtime.queue import enqueue, handler
 from inferra.runtime.recorder import Recorder
+from inferra.runtime.scheduler import raise_alerts, schedule_monitor
 from inferra.tools.base import ToolContext
 
 AGENT_TITLES = {
@@ -250,4 +251,6 @@ def execute_run(db: Session, payload: dict[str, Any]) -> None:
             _finish(db, run, "failed", f"{title} failed: {exc}")
             return
 
+    schedule = schedule_monitor(db, run)
+    raise_alerts(db, run, schedule.id if schedule else run.schedule_id)
     _finish(db, run, "completed")

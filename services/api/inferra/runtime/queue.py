@@ -5,6 +5,7 @@ SQLite (development and tests) has a single writer, so a plain select is enough 
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -55,7 +56,7 @@ def claim_next(db: Session) -> Job | None:
 
 def run_one() -> bool:
     """Claim and process one job. Returns False when the queue is empty."""
-    from inferra.runtime import executor  # noqa: F401  (registers handlers)
+    from inferra.runtime import executor, scheduler  # noqa: F401  (registers handlers)
 
     with session_scope() as db:
         job = claim_next(db)
@@ -85,10 +86,24 @@ def drain(max_jobs: int = 100) -> int:
     return count
 
 
-def work_forever(poll_seconds: float = 1.0, stop: threading.Event | None = None) -> None:
+def tick_schedules() -> int:
+    """Enqueue due scheduled re-runs."""
+    from inferra.runtime.scheduler import fire_due
+
+    with session_scope() as db:
+        return len(fire_due(db))
+
+
+def work_forever(
+    poll_seconds: float = 1.0, stop: threading.Event | None = None, schedule_every: float = 30.0
+) -> None:
     stop = stop or threading.Event()
+    next_tick = 0.0
     while not stop.is_set():
         try:
+            if time.monotonic() >= next_tick:
+                next_tick = time.monotonic() + schedule_every
+                tick_schedules()
             if run_one():
                 continue
         except Exception:

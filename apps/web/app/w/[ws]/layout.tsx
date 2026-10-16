@@ -1,39 +1,16 @@
 "use client";
 
-import { Brain, Database, Gauge, History, Lightbulb, LogOut, Moon, Network, Sparkles, Sun } from "lucide-react";
+import { BellRing, Brain, Database, FileText, Gauge, History, Lightbulb, LogOut, Network, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { Logo } from "@/components/logo";
 import { SessionProvider, useSession } from "@/components/session";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge, cx, Spinner } from "@/components/ui";
-
-function ThemeToggle() {
-  const [dark, setDark] = useState(false);
-  useEffect(() => {
-    let saved: string | null = null;
-    try {
-      saved = localStorage.getItem("inferra:theme");
-    } catch {}
-    const isDark = saved ? saved === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
-    setDark(isDark);
-    if (saved) document.documentElement.dataset.theme = saved;
-  }, []);
-  function toggle() {
-    const next = dark ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try {
-      localStorage.setItem("inferra:theme", next);
-    } catch {}
-    setDark(!dark);
-  }
-  return (
-    <button onClick={toggle} className="rounded-lg p-2 text-ink-3 hover:bg-surface-2 hover:text-ink" aria-label="Toggle theme">
-      {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-    </button>
-  );
-}
+import { api } from "@/lib/api";
+import type { Overview } from "@/lib/types";
 
 function Shell({ children }: { children: ReactNode }) {
   const { ws } = useParams<{ ws: string }>();
@@ -41,6 +18,16 @@ function Shell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { user, workspaces, logout } = useSession();
   const current = workspaces.find((w) => w.id === ws);
+  const [alerts, setAlerts] = useState(0);
+
+  // Open alerts drive the badge on Monitors; refresh on navigation and every minute.
+  useEffect(() => {
+    if (!current) return;
+    const load = () => api.get<Overview>(`/workspaces/${current.id}/overview`).then((o) => setAlerts(o.open_alerts), () => {});
+    load();
+    const timer = setInterval(load, 60_000);
+    return () => clearInterval(timer);
+  }, [current, pathname]);
 
   useEffect(() => {
     if (!current) router.replace("/");
@@ -56,6 +43,8 @@ function Shell({ children }: { children: ReactNode }) {
     { href: base, label: "Ask", icon: Sparkles, active: pathname === base },
     { href: `${base}/runs`, label: "Runs", icon: History, active: pathname.startsWith(`${base}/runs`) },
     { href: `${base}/insights`, label: "Insights", icon: Lightbulb, active: pathname.startsWith(`${base}/insights`) },
+    { href: `${base}/reports`, label: "Reports", icon: FileText, active: pathname.startsWith(`${base}/reports`) },
+    { href: `${base}/monitors`, label: "Monitors", icon: BellRing, active: pathname.startsWith(`${base}/monitors`), count: alerts },
     { href: `${base}/metrics`, label: "Metrics", icon: Gauge, active: pathname.startsWith(`${base}/metrics`) },
     { href: `${base}/datasets`, label: "Datasets", icon: Database, active: pathname.startsWith(`${base}/datasets`) },
     { href: `${base}/data-models`, label: "Data models", icon: Network, active: pathname.startsWith(`${base}/data-models`) },
@@ -84,17 +73,22 @@ function Shell({ children }: { children: ReactNode }) {
           ))}
         </select>
         <nav className="flex gap-1 overflow-x-auto md:flex-col">
-          {nav.map(({ href, label, icon: Icon, active }) => (
+          {nav.map(({ href, label, icon: Icon, active, count }) => (
             <Link
               key={href}
               href={href}
               className={cx(
-                "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium",
+                "flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium whitespace-nowrap",
                 active ? "bg-accent-soft text-accent" : "text-ink-2 hover:bg-surface-2 hover:text-ink",
               )}
             >
               <Icon className="size-4" aria-hidden />
               {label}
+              {count ? (
+                <span className="tabular ml-auto rounded-full bg-bad px-1.5 text-[11px] leading-[18px] font-semibold text-bg" aria-label={`${count} open alerts`}>
+                  {count}
+                </span>
+              ) : null}
             </Link>
           ))}
         </nav>

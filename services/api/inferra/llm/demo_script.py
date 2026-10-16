@@ -42,6 +42,19 @@ def _catalog(req: Request) -> list[dict[str, Any]]:
 
 MODELING_ROUTES: list[tuple[re.Pattern[str], str, str, str, dict[str, str]]] = [
     (
+        re.compile(r"\b(alert|monitor|watch|every (day|week|monday))", re.I),
+        "daily_funnel",
+        "monitor",
+        "The user wants a recurring check with an alert: a monitoring task.",
+        {
+            "metric": "conversion_rate",
+            "cadence": "weekly",
+            "direction": "down",
+            "threshold": "0.1",
+            "dimensions": "platform, app_version",
+        },
+    ),
+    (
         re.compile(r"star schema|data model|dimensional|\bmodel the\b", re.I),
         "retail_order_lines",
         "model_data",
@@ -228,6 +241,8 @@ def analyst_agent(req: Request) -> list[Any]:
         ]
     if "(intent: diagnose)" in req.first_user_text:
         return _diagnose_steps(table, results)
+    if "(intent: monitor)" in req.first_user_text:
+        return _monitor_steps(results)
     if "(intent: forecast)" in req.first_user_text:
         if not results:
             return [
@@ -308,6 +323,8 @@ def insights(req: Request) -> list[Any]:
         return experiment_insights(arts)
     if any(k.startswith("Difference-in-differences:") for k in arts):
         return did_insights(arts)
+    if any(k.startswith("Check of") for k in arts):
+        return monitor_insights(arts)
     if any(k.startswith("What moved") for k in arts):
         return diagnose_insights(arts)
     if any(k.startswith("Forecast:") for k in arts):
@@ -757,6 +774,99 @@ def _diagnose_steps(table: str, results: list[dict[str, Any]]) -> list[Any]:
             },
         )
     ]
+
+
+def _monitor_steps(results: list[dict[str, Any]]) -> list[Any]:
+    if not results:
+        return [
+            ToolUseBlock(
+                "check_metric",
+                {"metric": "conversion_rate", "grain": "week", "direction": "down", "threshold": 0.1},
+            )
+        ]
+    check = results[0]["result"]
+    if check["alert"] and len(results) == 1:
+        return [
+            ToolUseBlock(
+                "decompose_change",
+                {
+                    "metric": "conversion_rate",
+                    "baseline_start": check["baseline"]["start"],
+                    "baseline_end": check["baseline"]["end"],
+                    "comparison_start": check["latest"]["period"],
+                    "comparison_end": check["latest"]["end"],
+                    "dimensions": ["platform", "app_version"],
+                },
+            )
+        ]
+    ids = [r["artifact_id"] for r in results]
+    return [
+        ToolUseBlock(
+            "finish_step",
+            {
+                "summary": f"Weekly check ({ids[0]}): status {check['status']}. {check['reason']}"
+                + (f" Decomposition of the latest week: {ids[1]}." if len(ids) > 1 else ""),
+                "key_artifact_ids": ids,
+            },
+        )
+    ]
+
+
+def monitor_insights(arts: dict[str, dict[str, Any]]) -> list[Any]:
+    check = next(v for k, v in arts.items() if k.startswith("Check of"))
+    d = check["data"]
+    label = d["metric"]["label"]
+    latest, base = d["latest"], d["baseline"]
+    alert = d["alert"]
+    out = [
+        {
+            "title": f"{label} is below its normal range" if alert else f"{label} is within its normal range",
+            "claim": f"In the {d['grain']} of {latest['period']}, {label.lower()} was {_pct(latest['value'], 2)} "
+            f"against a median of {_pct(base['median'], 2)} over the previous {base['periods']} {d['grain']}s, "
+            f"a {_pct(abs(d['relative_change']))} {'decline' if d['change'] < 0 else 'increase'}.",
+            "evidence": [
+                _ev(check, "status"),
+                _ev(check, "latest.value"),
+                _ev(check, "baseline.median"),
+                _ev(check, "baseline.periods"),
+                _ev(check, "relative_change"),
+            ],
+            "method": f"Latest complete {d['grain']} compared with the median of the previous {d['grain']}s; "
+            "an alert needs both the threshold crossing and a value outside three robust standard deviations.",
+            "caveats": [
+                "The baseline is the recent past; seasonality longer than the baseline window is not modeled."
+            ],
+            "recommended_action": "Find what changed in the latest period before it compounds."
+            if alert
+            else "No action needed; the next scheduled check will run automatically.",
+            "confidence": "high" if alert else "medium",
+        }
+    ]
+    decomposition = next((v for k, v in arts.items() if k.startswith("What moved")), None)
+    if decomposition is not None:
+        dims = decomposition["data"]["dimensions"]
+        top = dims[0]
+        si = next(i for i, sg in enumerate(top["segments"]) if sg["segment"] == top["top_segment"])
+        seg = top["segments"][si]
+        out.append(
+            {
+                "title": f"{top['dimension'].replace('_', ' ').capitalize()} {seg['segment']} carries the move",
+                "claim": f"{top['dimension'].replace('_', ' ').capitalize()} {seg['segment']} accounts for "
+                f"{_pct(seg['share_of_change'])} of the change in the latest {d['grain']} while carrying "
+                f"{_pct(seg['comparison_weight'])} of the volume.",
+                "evidence": [
+                    _ev(decomposition, f"dimensions.0.segments.{si}.share_of_change"),
+                    _ev(decomposition, f"dimensions.0.segments.{si}.comparison_weight"),
+                ],
+                "method": "Mix/rate decomposition of the latest period against the baseline period.",
+                "caveats": [
+                    "A decomposition attributes the change arithmetically; it does not show why it happened."
+                ],
+                "recommended_action": f"Start the investigation with {seg['segment']}, or run a full diagnosis.",
+                "confidence": "medium",
+            }
+        )
+    return [ToolUseBlock("submit_insights", {"insights": out})]
 
 
 def diagnose_insights(arts: dict[str, dict[str, Any]]) -> list[Any]:

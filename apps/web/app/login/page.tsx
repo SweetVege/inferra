@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, ShieldCheck, Sparkles, Workflow } from "lucide-react";
+import { ArrowRight, BellRing, ShieldCheck, Sparkles, Workflow } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 
@@ -13,6 +13,7 @@ const POINTS = [
   { icon: Sparkles, title: "Ask in plain English", text: "Describe the question. The Orchestrator turns it into a plan you approve." },
   { icon: Workflow, title: "A team of agents", text: "Data, Analyst, and Insight agents run real queries and statistics on your data." },
   { icon: ShieldCheck, title: "Verified, then reviewed", text: "Every number is checked against tool output before you accept an insight." },
+  { icon: BellRing, title: "Share and keep watching", text: "Publish reviewed findings as a report anyone can read by link, and re-run checks on a schedule." },
 ];
 
 function GitHubMark() {
@@ -90,7 +91,7 @@ function LoginForm() {
       <Button className="w-full" loading={busy === "demo"} onClick={() => void run("demo", () => api.post("/auth/demo"))}>
         Explore the demo workspace <ArrowRight className="size-4" aria-hidden />
       </Button>
-      <p className="text-center text-xs text-ink-3">The demo is read-only and shows a completed analysis.</p>
+      <p className="text-center text-xs text-ink-3">The demo is read-only and shows completed analyses, a shared report, and a monitor.</p>
     </div>
   );
 }

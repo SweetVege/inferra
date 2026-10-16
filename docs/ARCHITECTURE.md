@@ -107,6 +107,7 @@ The Orchestrator classifies the goal into one intent and instantiates the matchi
 | `predict` | "Predict which users will churn" | build features → Data · train + evaluate + explain → ML · insights + model card → Insight |
 | `forecast` | "Forecast next month's orders" | prepare series → Data · forecast with intervals → Analyst · insights → Insight |
 | `model_data` | "Turn these raw tables into an analytics model" | profile + grain, entities, joins → Data · design star schema, build, test, fix → Data Modeler · insights → Insight |
+| `monitor` | "Alert me when conversion drops" | check freshness and volumes → Data · `check_metric` against the trailing baseline, decompose if it alerts → Analyst · insights → Insight; the completed run becomes a schedule |
 
 The Orchestrator may add, drop, or parameterize steps within a template (for example, skip CUPED when no pre-period covariate exists), but it cannot create a step type that has no owning agent. If no intent fits with enough confidence, it asks the user rather than guessing.
 
@@ -177,12 +178,43 @@ The **Verifier** is deterministic code that runs on every draft:
 9. **Assumptions.** Causal wording from an observational method (difference-in-differences, matching) needs a passing method check (parallel pre-trends, covariate balance) and a caveat naming the identifying assumption.
 10. **Held-out metrics.** Model performance must be cited from holdout or cross-validation results, never training metrics; forecasts must be cited with their prediction interval.
 11. **Model tests.** An insight citing a data model whose build has failing tests must say so in a caveat and cannot be high confidence.
+12. **Alert status.** An insight citing a metric check must also cite the check's `status` (`alert` or `ok`), so a monitoring headline always rests on the tool's decision, not on prose.
 
 The verifier checks that numbers are grounded and that the wording matches the strength of the evidence; it cannot judge whether the reasoning connecting them is right. That is what human review is for.
 
 Failures go back to the Insight Agent with reasons (at most 2 revisions). Insights that still fail are shown to the reviewer flagged as **Unverified**, never silently dropped.
 
-Only **accepted or edited** insights can be published into a report.
+Only **accepted or edited** insights can be published into a report. This is checked when an insight is added and again on every publish, since a reviewer can reject an insight in between.
+
+### Reports
+
+A report is a title, a summary written by a person, and an ordered list of reviewed insights.
+**Publishing** freezes a self-contained snapshot: the insights, every artifact they cite (so charts
+render without the run), and an appendix with each source run's plan, step summaries, and the tool
+and SQL behind each cited number. Edits after that show as "unpublished changes" until the next
+publish. **Sharing** creates an unguessable token (`/r/{token}`); the public endpoint returns only
+the published snapshot and needs no session, and revoking deletes the token so the link stops working
+at once.
+
+### Monitoring and scheduled re-runs
+
+A **schedule** stores a copy of a plan a person approved, plus a cadence (daily, or weekly on a
+weekday, at an hour in UTC). The worker checks for due schedules every 30 seconds and claims each one
+with a compare-and-set update on `next_run_at`, so several workers never start the same run twice.
+A scheduled run refreshes the plan's extracts and published data model nodes first (keeping the last
+extract, and saying so, if a source is unreachable), then executes the same plan without
+re-planning, so its results are comparable from week to week. Creating the schedule is the approval;
+new insights still arrive as drafts for review.
+
+The `monitor` workflow adds the decision. `check_metric` compares the latest complete day or week
+with the median of the previous periods (a partial latest period is left out). It alerts only when
+the change crosses the threshold in the watched direction **and** the value falls outside three
+robust standard deviations (from the MAD), so normal noise does not page anyone and a shift that
+began inside the baseline window does not hide itself. When a run completes, the executor raises an
+**alert** for every metric check whose status is `alert`; nothing is inferred from prose. A completed
+monitor run becomes its own schedule. Alerts show in the app (a badge on Monitors and a banner on the
+run) until someone acknowledges them; email and Slack delivery are a possible later step. Demo
+workspaces never fire, since their data is static.
 
 ## 7. Data access
 
@@ -265,6 +297,11 @@ erDiagram
   Insight }o--o{ Artifact : cites
   Workspace ||--o{ Report : publishes
   Report }o--o{ Insight : includes
+  Workspace ||--o{ Schedule : schedules
+  Run ||--o| Schedule : "approved plan for"
+  Schedule ||--o{ Run : "re-runs"
+  Run ||--o{ Alert : raises
+  Schedule ||--o{ Alert : groups
   Workspace ||--o{ Experiment : registers
   Workspace ||--o{ Model : registers
   Workspace ||--o{ Connection : connects
@@ -278,6 +315,7 @@ erDiagram
 
 ## 9. Runtime and operations
 
+- **Schedules.** The worker loop also enqueues due scheduled re-runs (see §6), so production needs no separate cron.
 - **Jobs.** Planning and execution run as background jobs on a Postgres-backed queue (`SELECT … FOR UPDATE SKIP LOCKED`, no Redis). In development the API process runs the worker in a thread; in production it can run as a separate `python -m inferra.worker` process. While a run is active the UI polls its state; the append-only `run_events` table drives the activity timeline.
 - **LLM gateway.** One module (`llm/gateway.py`) wraps the Claude API: the model comes from `INFERRA_LLM_MODEL`, effort is set per role (planning, specialist, insight), requests stream, prompts are cached, refusals fall back server-side, and token usage is accumulated per run. Agents depend on a small `LLMClient` protocol, so tests and the demo seed use a scripted client that drives the exact same pipeline. Per-workspace budgets are planned.
 - **Auth.** GitHub OAuth plus a read-only demo workspace with seeded datasets and completed runs.
@@ -296,7 +334,7 @@ inferra/
 │  │  ├─ auth/                # GitHub OAuth, signed-cookie sessions, workspace roles
 │  │  ├─ agents/              # orchestrator.py, specialist.py (Data, Analyst, Experiment, ML, Modeler), insight.py, prompts.py
 │  │  ├─ workflows/           # intent templates
-│  │  ├─ runtime/             # job queue, run executor, recorder (tool calls, artifacts, events)
+│  │  ├─ runtime/             # job queue, run executor, scheduler and alerts, recorder (tool calls, artifacts, events)
 │  │  ├─ tools/               # typed tools: profiling, SQL, metrics, experiments, modeling, ml, datamodel
 │  │  ├─ transform/           # data models: compile, build + tests, star-schema design, dbt export
 │  │  ├─ metrics_layer.py     # metric definitions -> tool specs

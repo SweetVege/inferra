@@ -2,7 +2,7 @@
 
 import { DivergingBars, LineChart, type Series } from "@/components/charts";
 import { DataTable } from "@/components/data-table";
-import { Badge } from "@/components/ui";
+import { Badge, cx } from "@/components/ui";
 import { formatMetric, formatNumber, formatPercent } from "@/lib/format";
 
 type Row = Record<string, unknown>;
@@ -145,6 +145,63 @@ export function DecompositionView({ d }: { d: Row }) {
       <p className="text-xs text-ink-3">
         {label}: {ratio ? "mix effects come from segments' weights moving; rate effects from segments' own rates moving." : "segment deltas add up to the total change."}{" "}
         Attribution, not causation.
+      </p>
+    </div>
+  );
+}
+
+export function MetricCheckView({ d }: { d: Row }) {
+  const { label, format } = metricInfo(d);
+  const series = (d.series as Row[]) ?? [];
+  const latest = (d.latest as Row) ?? {};
+  const base = (d.baseline as Row) ?? {};
+  const alert = d.status === "alert";
+  const inWindow = series.filter((p) => String(p.period) >= String(base.start));
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={alert ? "bad" : "good"}>{alert ? "Alert" : "Within range"}</Badge>
+        <span className="text-sm text-ink-2">{String(d.reason ?? "")}</span>
+      </div>
+      <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <div>
+          <dt className="text-[11px] text-ink-3">
+            Latest {String(d.grain)} · {String(latest.period)}
+          </dt>
+          <dd className="tabular text-lg font-semibold">{formatMetric(num(latest.value), format)}</dd>
+        </div>
+        <div>
+          <dt className="text-[11px] text-ink-3">Median of previous {String(base.periods)}</dt>
+          <dd className="tabular text-lg font-semibold">{formatMetric(num(base.median), format)}</dd>
+        </div>
+        <div>
+          <dt className="text-[11px] text-ink-3">Change</dt>
+          <dd className={cx("tabular text-lg font-semibold", alert && "text-bad")}>{formatPercent(num(d.relative_change))}</dd>
+        </div>
+      </dl>
+      <LineChart
+        label={`${label} against its normal range`}
+        marker={{ x: String(latest.period), label: "latest" }}
+        series={[
+          {
+            name: label,
+            color: "var(--series-1)",
+            points: series.map((p) => ({ x: String(p.period), y: num(p.value) })),
+            band: inWindow.map((p) => ({ x: String(p.period), low: num(base.low), high: num(base.high) })),
+          },
+          {
+            name: "Baseline median",
+            color: "var(--series-2)",
+            dashed: true,
+            points: inWindow.map((p) => ({ x: String(p.period), y: num(base.median) })),
+          },
+        ]}
+        format={(v) => formatMetric(v, format)}
+      />
+      <p className="text-xs text-ink-3">
+        The shaded band is the normal range (median ± 3 robust standard deviations of the baseline). An alert needs a move beyond{" "}
+        {formatPercent(num(d.threshold), 0)} {d.direction === "both" ? "in either direction" : String(d.direction)} and a value outside the band.
+        {d.excluded_partial_period ? ` The partial ${String(d.grain)} of ${String(d.excluded_partial_period)} is left out.` : ""}
       </p>
     </div>
   );

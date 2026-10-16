@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Check, ChevronRight, CircleDashed, Clock, Loader2, MessageCircleQuestion, MinusCircle, X, XCircle } from "lucide-react";
+import { ArrowLeft, BellRing, CalendarClock, Check, ChevronRight, CircleDashed, Clock, Loader2, MessageCircleQuestion, MinusCircle, X, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
@@ -11,7 +11,7 @@ import { canEdit, useWorkspace } from "@/components/session";
 import { AGENTS, AgentAvatar, Badge, Button, Card, CodeBlock, cx, ErrorBanner, RunStatusBadge, SectionTitle, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatCompact, timeAgo, titleCase } from "@/lib/format";
-import type { Artifact, Insight, RunDetail, Step, ToolCall } from "@/lib/types";
+import type { Artifact, Insight, RunDetail, Schedule, Step, ToolCall } from "@/lib/types";
 
 const ACTIVE = new Set(["planning", "running"]);
 
@@ -174,7 +174,79 @@ function ClarificationPanel({ run, editable, onAnswer }: { run: RunDetail; edita
   );
 }
 
-const FEATURED = new Set(["data_model", "keys", "cuped", "ab_test", "power", "did", "psm", "forecast", "model", "regression", "anomalies", "decomposition", "metric"]);
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function SchedulePanel({ run, ws, editable, onScheduled }: { run: RunDetail; ws: string; editable: boolean; onScheduled: (s: Schedule) => void }) {
+  const [cadence, setCadence] = useState<"daily" | "weekly">("weekly");
+  const [weekday, setWeekday] = useState(0);
+  const [hour, setHour] = useState(8);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const schedule = run.schedules[0];
+  const select = "h-8 rounded-lg border border-line bg-surface px-2 text-sm";
+
+  if (schedule) {
+    return (
+      <Card className="flex flex-wrap items-center gap-3 p-4 text-sm">
+        <CalendarClock className="size-5 shrink-0 text-accent" aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="font-medium">{schedule.enabled ? `Re-runs ${schedule.description.replace(/^Every/, "every")}` : "Schedule paused"}</span>
+          <span className="text-ink-2"> · the same plan, with fresh data and new insights each time</span>
+        </span>
+        <Link href={`/w/${ws}/monitors`} className="text-accent hover:underline">
+          Manage
+        </Link>
+      </Card>
+    );
+  }
+  if (!editable) return null;
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      onScheduled(await api.post<Schedule>(`/workspaces/${ws}/schedules`, { run_id: run.id, cadence, weekday, hour }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not schedule the run.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card className="space-y-2 p-4">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <CalendarClock className="size-5 shrink-0 text-ink-3" aria-hidden />
+        <span className="font-medium">Re-run this plan</span>
+        <select className={select} value={cadence} onChange={(e) => setCadence(e.target.value as "daily" | "weekly")} aria-label="Cadence">
+          <option value="daily">every day</option>
+          <option value="weekly">every week</option>
+        </select>
+        {cadence === "weekly" && (
+          <select className={select} value={weekday} onChange={(e) => setWeekday(Number(e.target.value))} aria-label="Weekday">
+            {WEEKDAYS.map((d, i) => (
+              <option key={d} value={i}>
+                on {d}
+              </option>
+            ))}
+          </select>
+        )}
+        <select className={select} value={hour} onChange={(e) => setHour(Number(e.target.value))} aria-label="Hour (UTC)">
+          {Array.from({ length: 24 }, (_, h) => (
+            <option key={h} value={h}>
+              at {String(h).padStart(2, "0")}:00 UTC
+            </option>
+          ))}
+        </select>
+        <Button size="sm" variant="primary" loading={busy} onClick={() => void submit()}>
+          Schedule
+        </Button>
+      </div>
+      <p className="text-xs text-ink-3">Scheduled runs reuse this approved plan, refresh extracts first, and add new insights for review.</p>
+      {error && <p className="text-sm text-bad">{error}</p>}
+    </Card>
+  );
+}
+
+const FEATURED = new Set(["data_model", "keys", "cuped", "ab_test", "power", "did", "psm", "forecast", "model", "regression", "anomalies", "decomposition", "metric", "metric_check"]);
 
 function ResultCard({ artifact, defaultOpen }: { artifact: Artifact; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -276,6 +348,11 @@ export default function RunPage() {
           <span className="inline-flex items-center gap-1">
             <Clock className="size-3.5" aria-hidden /> {timeAgo(run.created_at)}
           </span>
+          {run.schedule_id && (
+            <Link href={`/w/${ws}/monitors`} className="inline-flex items-center gap-1 hover:text-ink">
+              <CalendarClock className="size-3.5" aria-hidden /> Scheduled re-run
+            </Link>
+          )}
           {tokens > 0 && <span className="tabular">{formatCompact(tokens)} tokens · {run.usage.requests} model calls</span>}
           {editable && ACTIVE.has(run.status) && (
             <Button size="sm" variant="ghost" onClick={() => void act("cancel")}>
@@ -286,6 +363,17 @@ export default function RunPage() {
       </div>
 
       {error && <ErrorBanner message={error} />}
+      {run.alerts.map((a) => (
+        <Card key={a.id} className="flex items-start gap-3 border-bad/40 p-4 text-sm">
+          <BellRing className="mt-0.5 size-5 shrink-0 text-bad" aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">{a.title}.</span> <span className="text-ink-2">{a.message}</span>
+          </span>
+          <Link href={`/w/${ws}/monitors`} className="shrink-0 text-accent hover:underline">
+            {a.status === "open" ? "Review" : "Acknowledged"}
+          </Link>
+        </Card>
+      ))}
       {run.status === "needs_input" && <ClarificationPanel run={run} editable={editable} onAnswer={(answer) => act("answer", { answer })} />}
       {run.status === "awaiting_approval" && run.plan && <PlanPanel run={run} editable={editable} onAct={(a) => act(a)} />}
       {run.status === "planning" && (
@@ -312,6 +400,10 @@ export default function RunPage() {
             ))}
           </div>
         </section>
+      )}
+
+      {run.status === "completed" && !run.schedule_id && (
+        <SchedulePanel run={run} ws={ws} editable={editable} onScheduled={(sch) => setRun((r) => (r ? { ...r, schedules: [sch] } : r))} />
       )}
 
       {run.artifacts.length > 0 && (

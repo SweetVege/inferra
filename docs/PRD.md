@@ -37,7 +37,7 @@ Data work is split across many tools: SQL clients, notebooks, BI dashboards, exp
 ## 6. Functional scope
 
 ### 6.1 Natural-language goals and agent workflows
-- Intent classification across: explore, metric query, diagnose, experiment design, experiment analysis, effect estimation, predict, forecast, data modeling.
+- Intent classification across: explore, metric query, diagnose, experiment design, experiment analysis, effect estimation, predict, forecast, data modeling, monitoring.
 - Dataset and column resolution with confidence; clarifying questions when confidence is low.
 - Editable plan before execution; re-run from any step.
 - Run history with full tool-call logs.
@@ -70,11 +70,13 @@ Data work is split across many tools: SQL clients, notebooks, BI dashboards, exp
 ### 6.7 Insights and reports
 - Structured insights with deterministic verification: number grounding, statistical hygiene, causal-language rules.
 - Review workflow: Draft → Accepted / Edited / Rejected, with reviewer audit trail.
-- Insight feed across runs; shareable reports.
+- Insight feed across runs; shareable reports: a summary plus reviewed insights with their charts and a method appendix, published as a frozen version and shared by a revocable link that needs no account.
+- Scheduled re-runs of an approved plan (daily or weekly) and metric monitors that raise in-app alerts when a check crosses its threshold.
 
 ### 6.8 Platform
 - GitHub sign-in, workspaces, roles (Owner, Editor, Viewer).
-- Public read-only demo workspace with seeded datasets and completed runs.
+- Public read-only demo workspace with seeded datasets, completed runs, a shared report, and a monitor.
+- Getting-started checklist for new workspaces and a guided tour of the demo.
 - Usage limits and per-workspace LLM budget.
 
 ## 7. Roadmap
@@ -86,7 +88,7 @@ Data work is split across many tools: SQL clients, notebooks, BI dashboards, exp
 | **2. Modeling Studio** (done) | `estimate_effect`, `predict`, `forecast`; statistical and ML tools; model cards; model registry | A churn prediction and a DiD analysis run end to end on demo data |
 | **3. Analysis + Postgres** (done) | `metric_query`, `diagnose`; metric layer; Postgres connector; insight feed | "Why did conversion drop?" works against a connected Postgres database |
 | **4. Data Modeling + Warehouses** (done) | `model_data`; star-schema proposal, transforms, tests, lineage, dbt export; BigQuery and Snowflake connectors | Raw tables become a tested analytics model |
-| **5. Reports & polish** | Shareable reports, scheduled re-runs, onboarding | Portfolio launch |
+| **5. Reports & polish** (done) | Shareable reports, scheduled re-runs, `monitor` with alerts, onboarding | Portfolio launch |
 
 ## 8. Success metrics (for the portfolio and real use)
 

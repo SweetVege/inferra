@@ -5,15 +5,28 @@ visitors see genuine tool calls, artifacts, and verifier results without an API 
 
 import argparse
 import os
+import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
 
 from inferra import storage
+from inferra.api.reports import publish
 from inferra.auth.accounts import demo_user, demo_workspace
 from inferra.datasources.registry import datasource_for
-from inferra.db.models import Base, Dataset, Insight, MetricDefinition, Model, Run, Workspace
+from inferra.db.models import (
+    Base,
+    Dataset,
+    Insight,
+    MetricDefinition,
+    Model,
+    Report,
+    Run,
+    Schedule,
+    User,
+    Workspace,
+)
 from inferra.db.session import get_engine, session_scope
 from inferra.llm.demo_script import demo_script
 from inferra.llm.gateway import set_llm_factory
@@ -55,7 +68,7 @@ DEMO_RUNS = [
         "file": "daily_funnel.csv",
         "description": "Daily sessions, signups, and revenue by platform, app version, channel, and country.",
         "goal": "Why did signup conversion drop in late September?",
-        "accept": 0,
+        "accept": 2,
         "metrics": [
             {
                 "name": "conversion_rate",
@@ -89,6 +102,11 @@ DEMO_RUNS = [
         ],
     },
     {
+        "file": "daily_funnel.csv",
+        "goal": "Alert me every Monday if weekly signup conversion drops more than 10%.",
+        "accept": 1,
+    },
+    {
         "file": "retail_order_lines.csv",
         "description": "A flat export of 3,000 orders at order-line grain, with customer and product "
         "attributes repeated on every line.",
@@ -102,6 +120,13 @@ DEMO_RUNS = [
         "accept": 0,
     },
 ]
+
+
+REPORT_SUMMARY = (
+    "The redesigned checkout lifted conversion without slowing checkout down, so it is ready to roll "
+    "out. Separately, signup conversion stepped down in late September; the drop sits in one Android "
+    "release, and the weekly monitor is still flagging it."
+)
 
 
 def samples_dir() -> Path:
@@ -130,12 +155,22 @@ def seed_demo(reset: bool = False) -> str:
         db.add(ws)
         db.flush()
         user = demo_user(db)
+        user_id = user.id
         run_ids = []
+        ingested: dict[str, Dataset] = {}
         for spec in DEMO_RUNS:
-            dataset = ingest_file(
-                db, ws.id, samples_dir() / spec["file"], spec["file"], None, description=spec["description"]
-            )
-            dataset.profile = profile_table(datasource_for(db, ws.id, [dataset.id]), dataset.table_name)
+            dataset = ingested.get(spec["file"])
+            if dataset is None:
+                dataset = ingest_file(
+                    db,
+                    ws.id,
+                    samples_dir() / spec["file"],
+                    spec["file"],
+                    None,
+                    description=spec["description"],
+                )
+                dataset.profile = profile_table(datasource_for(db, ws.id, [dataset.id]), dataset.table_name)
+                ingested[spec["file"]] = dataset
             for metric in spec.get("metrics", []):
                 db.add(MetricDefinition(workspace_id=ws.id, dataset_id=dataset.id, **metric))
             db.flush()
@@ -164,10 +199,35 @@ def seed_demo(reset: bool = False) -> str:
                 ).all()
                 for insight in insights[:accept]:
                     insight.status = "accepted"
+                    insight.reviewed_by = user_id
                     insight.reviewed_at = datetime.now(UTC)
                 db.commit()
     finally:
         set_llm_factory(None)
+
+    with session_scope() as db:
+        # The demo is static data, so its schedule is shown paused rather than re-running forever.
+        for schedule in db.scalars(select(Schedule).where(Schedule.workspace_id == workspace_id)):
+            schedule.enabled = False
+        accepted = db.scalars(
+            select(Insight)
+            .join(Run, Run.id == Insight.run_id)
+            .where(Run.workspace_id == workspace_id, Insight.status == "accepted")
+            .order_by(Run.created_at, Insight.position)
+        ).all()
+        picked = [i for i in accepted if i.run_id in {run_ids[1][0], run_ids[4][0], run_ids[5][0]}]
+        report = Report(
+            workspace_id=workspace_id,
+            title="Weekly product review",
+            summary=REPORT_SUMMARY,
+            insight_ids=[i.id for i in picked],
+            created_by=user_id,
+        )
+        db.add(report)
+        user = db.get(User, user_id)
+        assert user is not None
+        publish(db, report, user)
+        report.share_token = secrets.token_urlsafe(24)
     return workspace_id
 
 

@@ -129,6 +129,7 @@ export interface RunSummary {
   intent: string | null;
   created_at: string;
   updated_at: string;
+  schedule_id: string | null;
   insight_count: number;
 }
 
@@ -244,6 +245,9 @@ export interface RunDetail {
   artifacts: Artifact[];
   insights: Insight[];
   events: RunEvent[];
+  schedule_id: string | null;
+  schedules: Schedule[];
+  alerts: Alert[];
 }
 
 export interface ModelSummary {
@@ -417,4 +421,110 @@ export interface InsightFeedItem extends Insight {
   run_goal: string;
   run_intent: string | null;
   created_at: string;
+}
+
+export interface Schedule {
+  id: string;
+  source_run_id: string | null;
+  goal: string;
+  intent: string;
+  plan_title: string | null;
+  cadence: "daily" | "weekly";
+  weekday: number;
+  hour: number;
+  description: string;
+  enabled: boolean;
+  next_run_at: string;
+  last_run_at: string | null;
+  created_at: string;
+  open_alerts: number;
+  recent_runs: { id: string; status: RunStatus; created_at: string }[];
+}
+
+export interface Alert {
+  id: string;
+  run_id: string;
+  schedule_id: string | null;
+  artifact_id: string | null;
+  title: string;
+  message: string;
+  data: {
+    metric?: { label?: string; format?: string };
+    period?: string;
+    value?: number;
+    baseline?: number;
+    relative_change?: number;
+    grain?: string;
+  };
+  status: "open" | "acknowledged";
+  acknowledged_at: string | null;
+  created_at: string;
+}
+
+export interface Overview {
+  datasets: number;
+  runs: number;
+  completed_runs: number;
+  reviewed_insights: number;
+  reports: number;
+  published_reports: number;
+  schedules: number;
+  open_alerts: number;
+}
+
+export interface ReportInsight {
+  id: string;
+  run_id: string;
+  title: string;
+  claim: string;
+  edited: boolean;
+  original_claim: string | null;
+  evidence: Evidence[];
+  method: string;
+  caveats: string[];
+  recommended_action: string | null;
+  confidence: "high" | "medium" | "low";
+  verified: boolean;
+  checks: { name: string; passed: boolean }[];
+  status: InsightStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+}
+
+export interface ReportContent {
+  title: string;
+  summary: string;
+  workspace: string;
+  insights: ReportInsight[];
+  artifacts: Artifact[];
+  appendix: {
+    run_id: string;
+    goal: string;
+    intent: string | null;
+    plan_title: string | null;
+    ran_at: string | null;
+    datasets: { name: string; table: string; rows: number }[];
+    steps: { agent: string; task: string; summary: string | null }[];
+    computations: { artifact_id: string; title: string; tool: string | null; code: string | null }[];
+  }[];
+  published_at?: string;
+  published_by?: string;
+}
+
+export interface ReportSummary {
+  id: string;
+  title: string;
+  insight_count: number;
+  state: "draft" | "published" | "changed";
+  shared: boolean;
+  published_at: string | null;
+  updated_at: string;
+}
+
+export interface ReportDetail extends ReportSummary {
+  summary: string;
+  insight_ids: string[];
+  share_token: string | null;
+  content: ReportContent;
+  published: ReportContent | null;
 }

@@ -319,6 +319,21 @@ def verify_insight(
             )
         )
 
+    # 12. A monitoring insight states the check's decision, so the alert never rests on prose alone.
+    checks_cited = {ev["artifact_id"] for ev, art in cited if art["kind"] == "metric_check"}
+    if checks_cited:
+        with_status = {ev["artifact_id"] for ev in verdict.resolved_evidence if ev["path"] == "status"}
+        missing_status = sorted(checks_cited - with_status)
+        verdict.checks.append(
+            Check(
+                "alert_status",
+                not missing_status,
+                "Cite the metric check's 'status' (alert or ok) alongside its numbers."
+                if missing_status
+                else "The check's alert decision is cited.",
+            )
+        )
+
     experiment_cited = [(ev, art) for ev, art in cited if art["kind"] in EXPERIMENT_KINDS]
     if not experiment_cited:
         return verdict

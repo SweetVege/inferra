@@ -180,6 +180,11 @@ class Run(TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text)
     usage: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    # Set when a schedule started this run. use_alter breaks the runs <-> schedules cycle.
+    schedule_id: Mapped[str | None] = mapped_column(
+        ForeignKey("schedules.id", ondelete="SET NULL", use_alter=True, name="fk_runs_schedule_id"),
+        index=True,
+    )
 
     steps: Mapped[list["Step"]] = relationship(
         back_populates="run", order_by="Step.position", cascade="all, delete-orphan"
@@ -254,6 +259,65 @@ class Insight(TimestampMixin, Base):
     review_note: Mapped[str | None] = mapped_column(Text)
     reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Schedule(TimestampMixin, Base):
+    """Re-runs an approved plan daily or weekly. Approving the schedule approves its future runs."""
+
+    __tablename__ = "schedules"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    source_run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"))
+    goal: Mapped[str] = mapped_column(Text)
+    intent: Mapped[str] = mapped_column(String(50))
+    plan: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    dataset_ids: Mapped[list[Any]] = mapped_column(default=list)
+    cadence: Mapped[str] = mapped_column(String(10), default="weekly")  # daily | weekly
+    weekday: Mapped[int] = mapped_column(Integer, default=0)  # 0 = Monday; weekly only
+    hour: Mapped[int] = mapped_column(Integer, default=8)  # UTC
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"))
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+
+class Alert(TimestampMixin, Base):
+    """Raised when a metric check in a run crosses its threshold. Tools decide; people acknowledge."""
+
+    __tablename__ = "alerts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    schedule_id: Mapped[str | None] = mapped_column(ForeignKey("schedules.id", ondelete="SET NULL"))
+    artifact_id: Mapped[str | None] = mapped_column(String(32))
+    title: Mapped[str] = mapped_column(String(300))
+    message: Mapped[str] = mapped_column(Text)
+    data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)  # open | acknowledged
+    acknowledged_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Report(TimestampMixin, Base):
+    """Reviewed insights assembled for readers. Publishing freezes a snapshot; a share token makes
+    that snapshot readable by link without signing in."""
+
+    __tablename__ = "reports"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(300))
+    summary: Mapped[str] = mapped_column(Text, default="")
+    insight_ids: Mapped[list[Any]] = mapped_column(default=list)  # ordered
+    snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    share_token: Mapped[str | None] = mapped_column(String(64), unique=True)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
 class RunEvent(TimestampMixin, Base):
