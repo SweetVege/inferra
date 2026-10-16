@@ -4,6 +4,8 @@
 
 > Language models reason. Tools compute. People decide.
 
+**[Live demo](https://inferra-demo.vercel.app)** · **[Sample report](https://inferra-demo.vercel.app/r/I3ok7ujo53s8UK0GWsOAsMhEXzse2qwD)** · no sign-up needed. The demo is read-only and shows completed runs, a shared report, and a metric monitor. If it has been idle, the first visit can take up to a minute while the API wakes up.
+
 ## How it works
 
 1. **Ask.** "Why did signup conversion drop in late September?"
