@@ -124,3 +124,22 @@ def test_demo_report_is_shared_and_read_only(client: TestClient) -> None:
     assert len(schedules) == 1 and schedules[0]["enabled"] is False
     alerts = client.get(f"/api/workspaces/{demo['id']}/alerts?status=open").json()
     assert len(alerts) == 1
+
+
+def test_demo_rebuilds_when_outdated_and_keeps_its_link(client: TestClient) -> None:
+    from inferra.db.models import Report
+    from inferra.db.session import session_scope
+    from inferra.seed import demo_share_token, seed_demo
+
+    first = seed_demo()
+    assert seed_demo() == first  # current: kept as is
+    login(client, "grace")  # a visitor with read access to the demo
+    with session_scope() as db:
+        db.query(Report).delete()  # what an older release's demo looks like
+    rebuilt = seed_demo()
+    assert rebuilt != first
+
+    demo = next(w for w in client.get("/api/workspaces").json() if w["is_demo"])
+    assert demo["id"] == rebuilt  # grace kept her access
+    snapshot = client.get(f"/api/public/reports/{demo_share_token()}")
+    assert snapshot.status_code == 200 and snapshot.json()["title"] == "Weekly product review"

@@ -16,7 +16,11 @@ COPY services/api ./
 COPY samples /app/samples
 RUN uv sync --frozen --no-dev
 
+# Run from the synced environment directly: `uv run` would re-sync (and install dev tools) on every start.
+ENV PATH="/app/services/api/.venv/bin:$PATH"
+
 EXPOSE 8000
-# Migrate, make sure the demo workspace exists, then serve. The worker can run in-process
-# (INFERRA_INLINE_WORKER=true) or as a separate service with: uv run python -m inferra.worker
-CMD ["sh", "-c", "uv run alembic upgrade head && uv run python -m inferra.seed && uv run uvicorn inferra.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Migrate, make sure the demo workspace is current, then serve. The worker (including scheduled
+# re-runs) runs in-process by default; set INFERRA_INLINE_WORKER=false and run `python -m inferra.worker`
+# as a separate service to split them.
+CMD ["sh", "-c", "alembic upgrade head && python -m inferra.seed && uvicorn inferra.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
