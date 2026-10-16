@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     llm_effort_insight: Literal["low", "medium", "high", "xhigh", "max"] = "high"
     llm_max_tokens: int = 16000
 
+    # Who may start agent runs, which spend the deployment's model budget. The allowlist is a
+    # comma-separated list of logins (empty: everyone signed in); the limit counts runs per person
+    # per UTC day, scheduled re-runs included (0: no limit).
+    run_allowlist: str = ""
+    daily_run_limit: int = 0
+
     # Runtime guardrails.
     inline_worker: bool = True
     max_tool_calls_per_step: int = 8
@@ -47,6 +53,10 @@ class Settings(BaseSettings):
     def model_post_init(self, _context: object) -> None:
         if self.allow_private_db_hosts is None:
             self.allow_private_db_hosts = self.env != "production"
+
+    @property
+    def run_allowlist_logins(self) -> set[str]:
+        return {login.strip().lower() for login in self.run_allowlist.split(",") if login.strip()}
 
     @property
     def dev_login_enabled(self) -> bool:

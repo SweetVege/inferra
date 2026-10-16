@@ -13,6 +13,7 @@ from inferra.auth.session import clear_session, current_user, set_session, sign,
 from inferra.config import get_settings
 from inferra.db.models import User
 from inferra.db.session import get_db
+from inferra.runtime.quota import run_quota
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 STATE_COOKIE = "inferra_oauth_state"
@@ -27,6 +28,19 @@ def providers() -> dict[str, bool]:
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(current_user)) -> User:
     return user
+
+
+@router.get("/quota")
+def quota(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, object]:
+    """Whether this user may start agent runs now, and how many are left today."""
+    q = run_quota(db, user)
+    return {
+        "allowed": q.allowed,
+        "limit": q.limit,
+        "used": q.used,
+        "remaining": q.remaining,
+        "reason": q.reason,
+    }
 
 
 @router.post("/logout")

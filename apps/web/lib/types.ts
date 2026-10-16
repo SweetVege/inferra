@@ -31,6 +31,14 @@ export interface IntentInfo {
   phase: string;
 }
 
+export interface RunQuota {
+  allowed: boolean;
+  limit: number | null;
+  used: number;
+  remaining: number | null;
+  reason: string | null;
+}
+
 export interface Meta {
   llm_available: boolean;
   intents: IntentInfo[];
