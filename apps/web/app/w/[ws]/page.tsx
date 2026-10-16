@@ -10,7 +10,7 @@ import { canEdit, useSession, useWorkspace } from "@/components/session";
 import { AGENTS, AgentAvatar, Badge, Card, cx, EmptyState, ErrorBanner, RunStatusBadge, SectionTitle, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatNumber, timeAgo } from "@/lib/format";
-import type { Dataset, RunDetail, RunSummary } from "@/lib/types";
+import type { Dataset, RunDetail, RunQuota, RunSummary } from "@/lib/types";
 
 const SUGGESTIONS = [
   "Give me an overview of this dataset. What stands out, and can I trust the data?",
@@ -30,6 +30,7 @@ export default function AskPage() {
   const editable = canEdit(workspace);
   const [datasets, setDatasets] = useState<Dataset[] | null>(null);
   const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [quota, setQuota] = useState<RunQuota | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [goal, setGoal] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,6 +39,7 @@ export default function AskPage() {
   useEffect(() => {
     api.get<Dataset[]>(`/workspaces/${ws}/datasets`).then(setDatasets, (e) => setError(e.message));
     api.get<RunSummary[]>(`/workspaces/${ws}/runs`).then(setRuns, () => {});
+    api.get<RunQuota>("/auth/quota").then(setQuota, () => {});
   }, [ws]);
 
   async function submit(e: FormEvent) {
@@ -58,9 +60,11 @@ export default function AskPage() {
     ? "This workspace is read-only. Open a completed run below, or sign in to use your own workspace."
     : !meta.llm_available
       ? "Agent runs need a configured model on the API (INFERRA_LLM_MODEL and ANTHROPIC_API_KEY)."
-      : datasets && datasets.length === 0
-        ? "Upload a dataset first."
-        : null;
+      : quota && !quota.allowed
+        ? quota.reason
+        : datasets && datasets.length === 0
+          ? "Upload a dataset first."
+          : null;
 
   return (
     <div className="mx-auto max-w-3xl space-y-10">
@@ -115,6 +119,11 @@ export default function AskPage() {
           </div>
         </Card>
         {disabledReason && <p className="text-sm text-ink-3">{disabledReason}</p>}
+        {!disabledReason && quota?.limit != null && (
+          <p className="text-sm text-ink-3">
+            {quota.remaining} of {quota.limit} agent run{quota.limit === 1 ? "" : "s"} left today. The limit resets at 00:00 UTC.
+          </p>
+        )}
         {error && <ErrorBanner message={error} />}
         {!disabledReason && (
           <div className="flex flex-wrap gap-2">

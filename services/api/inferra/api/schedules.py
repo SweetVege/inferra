@@ -11,6 +11,7 @@ from inferra.auth.session import WorkspaceAccess, workspace_access
 from inferra.db.models import Alert, Run, Schedule
 from inferra.db.session import get_db
 from inferra.runtime.queue import enqueue
+from inferra.runtime.quota import require_run_quota, run_quota
 from inferra.runtime.scheduler import create_schedule, describe, next_run
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["schedules"])
@@ -78,6 +79,9 @@ def add_schedule(
         raise HTTPException(409, "This run was started by a schedule; edit that schedule instead.")
     if db.scalars(select(Schedule).where(Schedule.source_run_id == run.id)).first() is not None:
         raise HTTPException(409, "This run is already scheduled.")
+    quota = run_quota(db, access.user)
+    if not quota.invited:
+        raise HTTPException(403, quota.reason)
     schedule = create_schedule(db, run, body.cadence, body.weekday, body.hour, access.user.id)
     db.commit()
     return schedule_out(db, schedule)
@@ -108,6 +112,7 @@ def run_now(
     """Start a run of the schedule now, without moving its next scheduled time."""
     access.require("editor")
     schedule = _schedule(db, access, schedule_id)
+    require_run_quota(db, access.user)
     enqueue(db, "scheduled_run", schedule_id=schedule.id)
     db.commit()
     return schedule_out(db, schedule)

@@ -12,8 +12,9 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from inferra.db.models import Alert, Artifact, Dataset, Run, Schedule, Step, Workspace
+from inferra.db.models import Alert, Artifact, Dataset, Run, Schedule, Step, User, Workspace
 from inferra.runtime.queue import enqueue, handler
+from inferra.runtime.quota import run_quota
 from inferra.runtime.recorder import Recorder
 
 log = logging.getLogger(__name__)
@@ -151,6 +152,27 @@ def scheduled_run(db: Session, payload: dict[str, Any]) -> None:
     schedule = db.get(Schedule, payload["schedule_id"])
     if schedule is None:
         return
+    owner = db.get(User, schedule.created_by) if schedule.created_by else None
+    quota = run_quota(db, owner) if owner is not None else None
+    if quota is None or not quota.allowed:
+        # Recorded as a failed run, so the schedule's history says why nothing ran.
+        run = Run(
+            workspace_id=schedule.workspace_id,
+            created_by=schedule.created_by,
+            goal=schedule.goal,
+            dataset_ids=list(schedule.dataset_ids),
+            intent=schedule.intent,
+            plan=schedule.plan,
+            status="failed",
+            error=quota.reason if quota else "The schedule's owner no longer exists.",
+            schedule_id=schedule.id,
+        )
+        db.add(run)
+        db.flush()
+        schedule.last_run_at, schedule.last_run_id = datetime.now(UTC), run.id
+        Recorder(db, run).event("failed", f"Scheduled re-run skipped: {run.error}", schedule_id=schedule.id)
+        return
+
     datasets = list(db.scalars(select(Dataset).where(Dataset.id.in_(schedule.dataset_ids))))
     if not datasets:
         schedule.enabled = False

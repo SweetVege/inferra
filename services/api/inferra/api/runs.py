@@ -18,6 +18,7 @@ from inferra.db.models import Alert, Artifact, Dataset, Insight, Run, RunEvent, 
 from inferra.db.session import get_db
 from inferra.llm.gateway import llm_available
 from inferra.runtime.queue import enqueue
+from inferra.runtime.quota import require_run_quota
 from inferra.runtime.recorder import Recorder
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["runs"])
@@ -103,6 +104,7 @@ def create_run(
             "Agent runs need a configured model. Set INFERRA_LLM_MODEL and "
             "ANTHROPIC_API_KEY on the API service.",
         )
+    require_run_quota(db, access.user)
     valid = set(db.scalars(select(Dataset.id).where(Dataset.workspace_id == access.workspace.id)))
     if not valid:
         raise HTTPException(400, "Upload a dataset before asking a question.")
