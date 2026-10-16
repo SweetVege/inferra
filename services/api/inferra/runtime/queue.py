@@ -56,7 +56,8 @@ def claim_next(db: Session) -> Job | None:
 
 def run_one() -> bool:
     """Claim and process one job. Returns False when the queue is empty."""
-    from inferra.runtime import executor, scheduler  # noqa: F401  (registers handlers)
+    from inferra import samples  # noqa: F401  (registers handlers)
+    from inferra.runtime import executor, scheduler  # noqa: F401
 
     with session_scope() as db:
         job = claim_next(db)

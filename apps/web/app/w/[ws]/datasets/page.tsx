@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ConnectionsPanel } from "@/components/connections";
+import { SampleDataButton } from "@/components/sample-data";
 import { canEdit, useWorkspace } from "@/components/session";
 import { Badge, Button, Card, cx, EmptyState, ErrorBanner, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -65,6 +66,16 @@ export default function DatasetsPage() {
         />
       </div>
       {error && <ErrorBanner message={error} />}
+      {editable && datasets?.length === 0 && (
+        <Card className="flex flex-col items-center gap-3 p-6 text-center">
+          <p className="font-medium">No data yet? Start with the samples.</p>
+          <p className="max-w-lg text-sm text-ink-2">
+            Seven small datasets that match the example questions: e-commerce orders, a checkout A/B test, customer churn, a store loyalty program, a daily
+            signup funnel with defined metrics, raw order lines, and daily sales.
+          </p>
+          <SampleDataButton ws={ws} variant="primary" onAdded={() => void load()} />
+        </Card>
+      )}
       {editable && (
         <div
           onDragOver={(e) => {

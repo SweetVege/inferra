@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { Onboarding } from "@/components/onboarding";
+import { SampleDataButton } from "@/components/sample-data";
 import { canEdit, useSession, useWorkspace } from "@/components/session";
 import { AGENTS, AgentAvatar, Badge, Card, cx, EmptyState, ErrorBanner, RunStatusBadge, SectionTitle, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -36,8 +37,35 @@ export default function AskPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A new workspace gets the sample datasets from a background job shortly after sign-in. When the
+  // first list is empty, keep checking (up to a minute) until it stops growing.
+  const [watching, setWatching] = useState(false);
   useEffect(() => {
-    api.get<Dataset[]>(`/workspaces/${ws}/datasets`).then(setDatasets, (e) => setError(e.message));
+    if (!editable || !watching) return;
+    let tries = 0;
+    let last = 0;
+    const timer = setInterval(() => {
+      tries += 1;
+      api.get<Dataset[]>(`/workspaces/${ws}/datasets`).then((d) => {
+        setDatasets(d);
+        if ((d.length > 0 && d.length === last) || tries >= 20) {
+          clearInterval(timer);
+          setWatching(false);
+        }
+        last = d.length;
+      }, () => {});
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [ws, editable, watching]);
+
+  useEffect(() => {
+    api.get<Dataset[]>(`/workspaces/${ws}/datasets`).then(
+      (d) => {
+        setDatasets(d);
+        setWatching(d.length === 0);
+      },
+      (e) => setError(e.message),
+    );
     api.get<RunSummary[]>(`/workspaces/${ws}/runs`).then(setRuns, () => {});
     api.get<RunQuota>("/auth/quota").then(setQuota, () => {});
   }, [ws]);
@@ -75,7 +103,7 @@ export default function AskPage() {
         </p>
       </header>
 
-      <Onboarding workspace={workspace} />
+      <Onboarding workspace={workspace} refreshKey={datasets?.length} />
 
       <form onSubmit={submit} className="space-y-3">
         <Card className="p-2 focus-within:border-accent">
@@ -143,10 +171,18 @@ export default function AskPage() {
 
       {datasets && datasets.length === 0 && (
         <EmptyState icon={Upload} title="No datasets yet">
-          <Link href={`/w/${ws}/datasets`} className="text-accent hover:underline">
-            Upload a CSV, Parquet, or Excel file
-          </Link>{" "}
-          to start asking questions.
+          <p>
+            Load the samples to try the example questions, or{" "}
+            <Link href={`/w/${ws}/datasets`} className="text-accent hover:underline">
+              upload a CSV, Parquet, or Excel file
+            </Link>
+            .
+          </p>
+          {editable && (
+            <div className="mt-4">
+              <SampleDataButton ws={ws} variant="primary" onAdded={(added) => setDatasets((d) => [...added, ...(d ?? [])])} />
+            </div>
+          )}
         </EmptyState>
       )}
 

@@ -1,6 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from inferra.config import get_settings
 from inferra.db.models import Membership, User, Workspace
 
 DEMO_LOGIN = "demo"
@@ -28,6 +29,7 @@ def upsert_user(
 ) -> User:
     """Find or create a user; new users get a personal workspace and read access to the demo."""
     user = None
+    personal: Workspace | None = None
     if github_id is not None:
         user = db.scalars(select(User).where(User.github_id == github_id)).first()
     elif login != DEMO_LOGIN:
@@ -49,6 +51,11 @@ def upsert_user(
     demo = demo_workspace(db)
     if demo is not None:
         ensure_membership(db, user, demo, "viewer")
+    if personal is not None and get_settings().sample_data_on_signup:
+        # Loaded by the worker, so sign-in stays fast; the Ask page shows them as they arrive.
+        from inferra.runtime.queue import enqueue
+
+        enqueue(db, "add_samples", workspace_id=personal.id, user_id=user.id)
     db.commit()
     return user
 

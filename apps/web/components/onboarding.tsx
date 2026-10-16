@@ -25,7 +25,7 @@ function items(ws: Workspace, o: Overview): Item[] {
     ];
   }
   return [
-    { title: "Add data", text: "Upload a CSV, Parquet, or Excel file, or connect Postgres, BigQuery, or Snowflake.", href: `${base}/datasets`, done: o.datasets > 0 },
+    { title: "Add data", text: "Load the sample datasets, upload a file, or connect Postgres, BigQuery, or Snowflake.", href: `${base}/datasets`, done: o.datasets > 0 },
     { title: "Ask a question", text: "Describe a goal below, then approve the plan the Orchestrator proposes.", href: base, done: o.runs > 0 },
     { title: "Review an insight", text: "Accept, edit, or reject each finding after checking its evidence.", href: `${base}/insights`, done: o.reviewed_insights > 0 },
     { title: "Publish a report", text: "Collect reviewed insights into a report and share it by link.", href: `${base}/reports`, done: o.published_reports > 0 },
@@ -34,7 +34,7 @@ function items(ws: Workspace, o: Overview): Item[] {
 }
 
 /** Getting started: a short checklist driven by what the workspace already has. Dismissible. */
-export function Onboarding({ workspace }: { workspace: Workspace }) {
+export function Onboarding({ workspace, refreshKey }: { workspace: Workspace; refreshKey?: number }) {
   const key = `inferra:onboarding:${workspace.id}`;
   const [overview, setOverview] = useState<Overview | null>(null);
   const [hidden, setHidden] = useState(true);
@@ -46,7 +46,7 @@ export function Onboarding({ workspace }: { workspace: Workspace }) {
     } catch {}
     setHidden(dismissed);
     if (!dismissed) api.get<Overview>(`/workspaces/${workspace.id}/overview`).then(setOverview, () => {});
-  }, [key, workspace.id]);
+  }, [key, workspace.id, refreshKey]);
 
   if (hidden || !overview) return null;
   const list = items(workspace, overview);

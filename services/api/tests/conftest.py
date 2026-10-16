@@ -15,6 +15,8 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[No
     monkeypatch.setenv("INFERRA_DATABASE_URL", db_url)
     monkeypatch.setenv("INFERRA_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("INFERRA_INLINE_WORKER", "false")
+    # Tests upload the datasets they need; signup samples are covered in test_samples.py.
+    monkeypatch.setenv("INFERRA_SAMPLE_DATA_ON_SIGNUP", "false")
     monkeypatch.delenv("INFERRA_LLM_MODEL", raising=False)
     monkeypatch.delenv("INFERRA_GITHUB_CLIENT_ID", raising=False)
 
