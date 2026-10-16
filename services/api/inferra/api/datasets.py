@@ -118,6 +118,17 @@ def get_dataset(
     return DatasetDetail(**_out(d).model_dump(), preview=preview, profile=d.profile)
 
 
+@router.post("/samples", response_model=list[DatasetOut], status_code=201)
+def add_samples(
+    access: WorkspaceAccess = Depends(workspace_access), db: Session = Depends(get_db)
+) -> list[DatasetOut]:
+    """Add the sample datasets this workspace does not have yet."""
+    from inferra.samples import add_sample_datasets
+
+    access.require("editor")
+    return [_out(d) for d in add_sample_datasets(db, access.workspace.id, access.user.id)]
+
+
 @router.post("/{dataset_id}/profile", response_model=DatasetDetail)
 def build_profile(
     dataset_id: str, access: WorkspaceAccess = Depends(workspace_access), db: Session = Depends(get_db)

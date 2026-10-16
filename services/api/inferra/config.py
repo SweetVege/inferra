@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     # per UTC day, scheduled re-runs included (0: no limit).
     run_allowlist: str = ""
     daily_run_limit: int = 0
+    # New personal workspaces start with the sample datasets, so people can ask right away.
+    sample_data_on_signup: bool = True
 
     # Runtime guardrails.
     inline_worker: bool = True

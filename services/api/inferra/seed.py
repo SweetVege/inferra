@@ -6,9 +6,7 @@ visitors see genuine tool calls, artifacts, and verifier results without an API 
 import argparse
 import base64
 import hmac
-import os
 from datetime import UTC, datetime
-from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -17,13 +15,11 @@ from inferra import storage
 from inferra.api.reports import publish
 from inferra.auth.accounts import demo_user, demo_workspace, ensure_membership
 from inferra.config import get_settings
-from inferra.datasources.registry import datasource_for
 from inferra.db.models import (
     Base,
     Dataset,
     Insight,
     Membership,
-    MetricDefinition,
     Model,
     Report,
     Run,
@@ -37,73 +33,33 @@ from inferra.llm.gateway import set_llm_factory
 from inferra.llm.scripted import ScriptedLLM
 from inferra.runtime import executor
 from inferra.runtime.recorder import Recorder
-from inferra.tools.profiling import profile_table
+from inferra.samples import ingest_sample
 
 DEMO_RUNS = [
     {
         "file": "ecommerce_orders.csv",
-        "description": "Six months of online orders with region, channel, discount, amount, returns, "
-        "and customer ratings.",
         "goal": "Give me an overview of our e-commerce orders: what stands out, and can we trust the data?",
         "accept": 2,
     },
     {
         "file": "checkout_experiment.csv",
-        "description": "A three-week randomized test of a redesigned checkout: one row per user with "
-        "variant, device, country, pre-period orders and spend, conversion, revenue, and checkout latency.",
         "goal": "Did the new checkout test win? Check conversion, and make sure latency did not get worse.",
         "accept": 1,
     },
     {
         "file": "customer_churn.csv",
-        "description": "Subscription customers with plan, tenure, engagement, support, billing, "
-        "and a churn label.",
         "goal": "Predict which customers are likely to churn and tell me what drives it.",
         "accept": 0,
     },
     {
         "file": "loyalty_program.csv",
-        "description": "Weekly sales for 60 stores; 24 joined a loyalty program starting the week "
-        "of 2026-04-06.",
         "goal": "Did the loyalty program increase weekly store sales?",
         "accept": 0,
     },
     {
         "file": "daily_funnel.csv",
-        "description": "Daily sessions, signups, and revenue by platform, app version, channel, and country.",
         "goal": "Why did signup conversion drop in late September?",
         "accept": 2,
-        "metrics": [
-            {
-                "name": "conversion_rate",
-                "label": "Signup conversion rate",
-                "description": "Signups divided by sessions.",
-                "kind": "ratio",
-                "numerator": {"kind": "sum", "column": "signups"},
-                "denominator": {"kind": "sum", "column": "sessions"},
-                "time_column": "date",
-                "dimensions": ["platform", "app_version", "channel", "country"],
-                "format": "percent",
-            },
-            {
-                "name": "sessions",
-                "label": "Sessions",
-                "kind": "sum",
-                "column": "sessions",
-                "time_column": "date",
-                "dimensions": ["platform", "channel", "country"],
-            },
-            {
-                "name": "revenue_per_session",
-                "label": "Revenue per session",
-                "kind": "ratio",
-                "numerator": {"kind": "sum", "column": "revenue"},
-                "denominator": {"kind": "sum", "column": "sessions"},
-                "time_column": "date",
-                "dimensions": ["platform", "channel"],
-                "format": "currency",
-            },
-        ],
     },
     {
         "file": "daily_funnel.csv",
@@ -112,14 +68,11 @@ DEMO_RUNS = [
     },
     {
         "file": "retail_order_lines.csv",
-        "description": "A flat export of 3,000 orders at order-line grain, with customer and product "
-        "attributes repeated on every line.",
         "goal": "Turn the order lines export into a star schema we can use for reporting.",
         "accept": 0,
     },
     {
         "file": "daily_sales.csv",
-        "description": "Eighteen months of daily orders and revenue.",
         "goal": "Forecast daily orders for the next four weeks.",
         "accept": 0,
     },
@@ -133,16 +86,7 @@ REPORT_SUMMARY = (
 )
 
 
-def samples_dir() -> Path:
-    env = os.environ.get("INFERRA_SAMPLES_DIR")
-    if env:
-        return Path(env)
-    return Path(__file__).resolve().parents[3] / "samples"
-
-
 def seed_demo(reset: bool = False) -> str:
-    from inferra.api.datasets import ingest_file
-
     Base.metadata.create_all(get_engine())
     viewers: list[str] = []
     with session_scope() as db:
@@ -174,19 +118,7 @@ def seed_demo(reset: bool = False) -> str:
         for spec in DEMO_RUNS:
             dataset = ingested.get(spec["file"])
             if dataset is None:
-                dataset = ingest_file(
-                    db,
-                    ws.id,
-                    samples_dir() / spec["file"],
-                    spec["file"],
-                    None,
-                    description=spec["description"],
-                )
-                dataset.profile = profile_table(datasource_for(db, ws.id, [dataset.id]), dataset.table_name)
-                ingested[spec["file"]] = dataset
-            for metric in spec.get("metrics", []):
-                db.add(MetricDefinition(workspace_id=ws.id, dataset_id=dataset.id, **metric))
-            db.flush()
+                dataset = ingested[spec["file"]] = ingest_sample(db, ws.id, spec["file"], None)
             run = Run(workspace_id=ws.id, created_by=user.id, goal=spec["goal"], dataset_ids=[dataset.id])
             db.add(run)
             db.flush()
