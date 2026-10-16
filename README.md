@@ -70,9 +70,9 @@ The end-to-end tests drive the real API, queue, agents, tools, and verifier with
 
 ## Deploy
 
-- **API:** Docker image from `services/api/Dockerfile` (build context: repository root). `render.yaml` is a ready Render blueprint. On start the container applies migrations, ensures the demo workspace exists, and serves. Use Postgres (e.g. Neon) and S3-compatible storage (e.g. Cloudflare R2).
-- **Web:** Vercel, root directory `apps/web`, with `INFERRA_API_URL` set to the API's URL.
-- **GitHub sign-in:** create an OAuth app with callback `<web origin>/api/auth/github/callback` and set `INFERRA_GITHUB_CLIENT_ID` / `INFERRA_GITHUB_CLIENT_SECRET` on the API.
+Vercel (web) + Render (API, Docker) + Neon (Postgres) + Cloudflare R2 (storage), all on free tiers.
+`render.yaml` is a ready Render blueprint; on start the API container applies migrations, keeps the
+demo workspace current, and serves. Step-by-step instructions, in order: [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Stack
 

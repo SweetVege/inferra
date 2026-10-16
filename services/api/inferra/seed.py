@@ -4,21 +4,25 @@ The demo run is produced by the real pipeline with a scripted model (see llm/dem
 visitors see genuine tool calls, artifacts, and verifier results without an API key."""
 
 import argparse
+import base64
+import hmac
 import os
-import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from inferra import storage
 from inferra.api.reports import publish
-from inferra.auth.accounts import demo_user, demo_workspace
+from inferra.auth.accounts import demo_user, demo_workspace, ensure_membership
+from inferra.config import get_settings
 from inferra.datasources.registry import datasource_for
 from inferra.db.models import (
     Base,
     Dataset,
     Insight,
+    Membership,
     MetricDefinition,
     Model,
     Report,
@@ -140,11 +144,20 @@ def seed_demo(reset: bool = False) -> str:
     from inferra.api.datasets import ingest_file
 
     Base.metadata.create_all(get_engine())
+    viewers: list[str] = []
     with session_scope() as db:
         existing = demo_workspace(db)
-        if existing is not None and not reset:
+        if existing is not None and not reset and _is_current(db, existing.id):
             return existing.id
         if existing is not None:
+            # Rebuilt on reset, or when a release changed the demo runs. Visitors keep their access.
+            viewers = list(
+                db.scalars(
+                    select(Membership.user_id).where(
+                        Membership.workspace_id == existing.id, Membership.role == "viewer"
+                    )
+                )
+            )
             for dataset in db.scalars(select(Dataset).where(Dataset.workspace_id == existing.id)):
                 storage.delete_file(dataset.storage_key)
             for model in db.scalars(select(Model).where(Model.workspace_id == existing.id)):
@@ -227,8 +240,24 @@ def seed_demo(reset: bool = False) -> str:
         user = db.get(User, user_id)
         assert user is not None
         publish(db, report, user)
-        report.share_token = secrets.token_urlsafe(24)
+        report.share_token = demo_share_token()
+        demo = db.get(Workspace, workspace_id)
+        for viewer in db.scalars(select(User).where(User.id.in_(viewers))):
+            ensure_membership(db, viewer, demo, "viewer")  # type: ignore[arg-type]
     return workspace_id
+
+
+def _is_current(db: Session, workspace_id: str) -> bool:
+    """The demo matches this release when it has the same goals and its shared report."""
+    goals = sorted(db.scalars(select(Run.goal).where(Run.workspace_id == workspace_id)))
+    report = db.scalars(select(Report).where(Report.workspace_id == workspace_id)).first()
+    return goals == sorted(spec["goal"] for spec in DEMO_RUNS) and report is not None
+
+
+def demo_share_token() -> str:
+    """Stable across rebuilds, so the demo report's public link can go in a README or a CV."""
+    secret = get_settings().secret_key.encode()
+    return base64.urlsafe_b64encode(hmac.digest(secret, b"inferra-demo-report", "sha256")[:24]).decode()
 
 
 def main() -> None:
