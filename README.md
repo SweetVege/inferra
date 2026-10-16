@@ -7,15 +7,15 @@
 ## How it works
 
 1. **Ask.** "Why did signup conversion drop in late September?"
-2. **Plan.** The Orchestrator maps the goal to a workflow template (explore, metric question, A/B analysis, …), fills in its parameters, and asks a clarifying question only when it must. You approve the plan, or let the workspace auto-approve.
-3. **Run.** Specialist agents call typed tools against a sandboxed DuckDB: profiling and read-only SQL; A/B test design and analysis (power, SRM, CUPED, segments, Bayesian and sequential reads); regression, difference-in-differences, propensity matching, and forecasting; and model training that compares gradient-boosted trees with a linear baseline, explains predictions with SHAP, and registers the winner for batch scoring. Every tool call is logged with its inputs, SQL, and output.
-4. **Verify.** The Insight Agent drafts findings that cite artifact values. A deterministic verifier checks that every number matches a cited value, blocks causal wording without a randomized or causal design, caps confidence on small samples, requires intervals with every estimate and forecast, requires observational causal claims to state their assumption, insists on held-out model metrics, and refuses effect claims from tests that failed their sample ratio check. Failed drafts go back for revision; drafts that still fail are flagged, not hidden.
+2. **Plan.** The Orchestrator maps the goal to a workflow template (explore, metric question, A/B analysis, data modeling, …), fills in its parameters, and asks a clarifying question only when it must. You approve the plan, or let the workspace auto-approve.
+3. **Run.** Specialist agents call typed tools against a sandboxed DuckDB: profiling and read-only SQL; A/B test design and analysis (power, SRM, CUPED, segments, Bayesian and sequential reads); regression, difference-in-differences, propensity matching, and forecasting; model training that compares gradient-boosted trees with a linear baseline, explains predictions with SHAP, and registers the winner for batch scoring; and dimensional modeling that finds a table's grain and entities, builds a tested star schema, and exports it as a dbt project. Every tool call is logged with its inputs, SQL, and output.
+4. **Verify.** The Insight Agent drafts findings that cite artifact values. A deterministic verifier checks that every number matches a cited value, blocks causal wording without a randomized or causal design, caps confidence on small samples, requires intervals with every estimate and forecast, requires observational causal claims to state their assumption, insists on held-out model metrics, refuses effect claims from tests that failed their sample ratio check, and makes failing data-model tests visible. Failed drafts go back for revision; drafts that still fail are flagged, not hidden.
 5. **Review.** You accept, edit, or reject each insight.
 
 ```mermaid
 flowchart LR
   G["Goal (plain English)"] --> O["Orchestrator<br/>intent + plan"]
-  O -->|approved| D["Data Agent"] --> S["Analyst, Experiment,<br/>or ML Agent"] --> I["Insight Agent"]
+  O -->|approved| D["Data Agent"] --> S["Analyst, Experiment,<br/>ML Agent, or Data Modeler"] --> I["Insight Agent"]
   D & S --> T["Typed tools<br/>DuckDB · scipy · statsmodels · LightGBM"]
   I --> V["Verifier<br/>(deterministic)"] --> R["Human review"]
 ```
@@ -30,7 +30,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/PRD.md
 | 1. MVP | A/B test design and analysis: power and duration, SRM, z/Welch tests, CUPED, segment effects with Holm correction, Bayesian and sequential reads | Done |
 | 2. Modeling Studio | Regression, difference-in-differences, propensity matching, Holt-Winters forecasting, ML with model selection, SHAP, model cards, registry, and batch scoring | Done |
 | 3. Analysis + Postgres | Metric layer, anomaly and change-point detection, exact mix/rate decomposition of metric changes, Postgres extracts, insight feed | Done |
-| 4. Data Modeling + Warehouses | Star-schema proposals, transforms, tests; BigQuery and Snowflake | Next |
+| 4. Data Modeling + Warehouses | Key and entity discovery, star-schema design, SQL transforms with tests and lineage, publishing as datasets, dbt export; BigQuery and Snowflake extracts | Done |
 
 ## Run it locally
 
@@ -73,4 +73,4 @@ The end-to-end tests drive the real API, queue, agents, tools, and verifier with
 
 ## Stack
 
-Next.js · TypeScript · Tailwind CSS · FastAPI · SQLAlchemy · Alembic · DuckDB · pandas · SciPy · statsmodels · scikit-learn · LightGBM · Postgres · Claude API
+Next.js · TypeScript · Tailwind CSS · FastAPI · SQLAlchemy · Alembic · DuckDB · pandas · SciPy · statsmodels · scikit-learn · LightGBM · dbt export · Postgres · BigQuery · Snowflake · Claude API

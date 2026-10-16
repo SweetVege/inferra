@@ -98,6 +98,25 @@ class Dataset(TimestampMixin, Base):
     connection_id: Mapped[str | None] = mapped_column(ForeignKey("connections.id", ondelete="SET NULL"))
     source_query: Mapped[str | None] = mapped_column(Text)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Datasets published from a data model: which model, and the node in source_query.
+    data_model_id: Mapped[str | None] = mapped_column(ForeignKey("data_models.id", ondelete="SET NULL"))
+
+
+class DataModel(TimestampMixin, Base):
+    """A dimensional model: SQL nodes with tests, built in the sandbox and published as datasets."""
+
+    __tablename__ = "data_models"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"))
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    nodes: Mapped[list[Any]] = mapped_column(default=list)  # NodeSpec dicts
+    last_build: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    built_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
 
 class MetricDefinition(TimestampMixin, Base):

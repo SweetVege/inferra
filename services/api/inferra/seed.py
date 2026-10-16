@@ -89,6 +89,13 @@ DEMO_RUNS = [
         ],
     },
     {
+        "file": "retail_order_lines.csv",
+        "description": "A flat export of 3,000 orders at order-line grain, with customer and product "
+        "attributes repeated on every line.",
+        "goal": "Turn the order lines export into a star schema we can use for reporting.",
+        "accept": 0,
+    },
+    {
         "file": "daily_sales.csv",
         "description": "Eighteen months of daily orders and revenue.",
         "goal": "Forecast daily orders for the next four weeks.",

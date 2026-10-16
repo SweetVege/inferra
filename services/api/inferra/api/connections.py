@@ -2,10 +2,10 @@ import json
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,23 +15,14 @@ from inferra.api.datasets import _unique_table_name
 from inferra.api.schemas import ORM, DatasetOut
 from inferra.auth.session import WorkspaceAccess, workspace_access
 from inferra.config import get_settings
-from inferra.datasources import postgres
 from inferra.datasources.base import QueryError
+from inferra.datasources.connectors import connector, parse_input
 from inferra.datasources.files import to_table_name
+from inferra.datasources.secrets import decrypt, encrypt
 from inferra.db.models import Connection, Dataset, new_id
 from inferra.db.session import get_db
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["connections"])
-
-
-class ConnectionIn(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    host: str = Field(min_length=1, max_length=255)
-    port: int = Field(default=5432, ge=1, le=65535)
-    database: str = Field(min_length=1, max_length=200)
-    user: str = Field(min_length=1, max_length=200)
-    password: str = Field(max_length=500)
-    sslmode: Literal["disable", "prefer", "require", "verify-ca", "verify-full"] = "prefer"
 
 
 class ConnectionOut(ORM):
@@ -43,7 +34,7 @@ class ConnectionOut(ORM):
 
 
 class ConnectionCreated(ConnectionOut):
-    server_version: str
+    server_version: str  # what the server reported when the credentials were checked
     tables: list[dict[str, Any]]
 
 
@@ -63,10 +54,6 @@ def _get(db: Session, access: WorkspaceAccess, connection_id: str) -> Connection
     return conn
 
 
-def _config(conn: Connection) -> postgres.PgConfig:
-    return postgres.PgConfig.from_dict(conn.config)
-
-
 @router.get("/connections", response_model=list[ConnectionOut])
 def list_connections(
     access: WorkspaceAccess = Depends(workspace_access), db: Session = Depends(get_db)
@@ -76,22 +63,28 @@ def list_connections(
 
 @router.post("/connections", response_model=ConnectionCreated, status_code=201)
 def create_connection(
-    body: ConnectionIn, access: WorkspaceAccess = Depends(workspace_access), db: Session = Depends(get_db)
+    body: dict[str, Any], access: WorkspaceAccess = Depends(workspace_access), db: Session = Depends(get_db)
 ) -> ConnectionCreated:
-    """Test the credentials, then store them (password encrypted)."""
+    """Test the credentials, then store them encrypted. The body's `kind` picks the connector
+    (postgres, bigquery, or snowflake); its other fields are that connector's settings."""
     access.require("editor")
-    config = postgres.PgConfig(body.host, body.port, body.database, body.user, body.sslmode)
     try:
-        version = postgres.server_version(config, body.password)
-        tables = postgres.list_tables(config, body.password)
+        kind, name, config, secret = parse_input(body)
+        impl = connector(kind)
+        version = impl.verify(config, secret)
+        tables = impl.tables(config, secret)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        field = ".".join(str(p) for p in first["loc"][1:]) or "body"
+        raise HTTPException(422, f"{field}: {first['msg']}") from exc
     except QueryError as exc:
         raise HTTPException(400, str(exc)) from exc
     conn = Connection(
         workspace_id=access.workspace.id,
-        name=body.name,
-        kind="postgres",
-        config=config.__dict__,
-        secret=postgres.encrypt(body.password),
+        name=name,
+        kind=kind,
+        config=config,
+        secret=encrypt(secret),
         created_by=access.user.id,
     )
     db.add(conn)
@@ -107,25 +100,22 @@ def connection_tables(
 ) -> list[dict[str, Any]]:
     conn = _get(db, access, connection_id)
     try:
-        return postgres.list_tables(_config(conn), postgres.decrypt(conn.secret))
+        return connector(conn.kind).tables(conn.config, decrypt(conn.secret))
     except QueryError as exc:
         raise HTTPException(400, str(exc)) from exc
 
 
-def _run_extract(
-    db: Session, conn: Connection, source: dict[str, Any], key: str
-) -> tuple[int, list[dict[str, str]]]:
-    query = postgres.source_sql(source.get("schema"), source.get("table"), source.get("sql"))
+def _run_extract(conn: Connection, source: dict[str, Any], key: str) -> tuple[int, list[dict[str, str]]]:
     dest = storage.local_path(key)
+    limit = get_settings().extract_max_rows
     with tempfile.TemporaryDirectory() as tmp:
         staging = Path(tmp) / "extract.parquet"
-        rows, columns, truncated = postgres.extract(
-            _config(conn), postgres.decrypt(conn.secret), query, staging, get_settings().extract_max_rows
+        rows, columns, truncated = connector(conn.kind).extract(
+            conn.config, decrypt(conn.secret), source, staging, limit
         )
         if truncated:
             raise QueryError(
-                f"The source has more than {get_settings().extract_max_rows:,} rows. "
-                "Extract an aggregated or filtered query instead."
+                f"The source has more than {limit:,} rows. Extract an aggregated or filtered query instead."
             )
         dest.parent.mkdir(parents=True, exist_ok=True)
         staging.replace(dest)
@@ -147,7 +137,7 @@ def create_extract(
     dataset_id = new_id()
     key = f"workspaces/{access.workspace.id}/{dataset_id}.parquet"
     try:
-        rows, columns = _run_extract(db, conn, source, key)
+        rows, columns = _run_extract(conn, source, key)
     except QueryError as exc:
         raise HTTPException(400, str(exc)) from exc
     base = body.name or body.table or "query"
@@ -155,11 +145,12 @@ def create_extract(
     dataset = Dataset(
         id=dataset_id,
         workspace_id=access.workspace.id,
-        source_kind="postgres",
+        source_kind=conn.kind,
         table_name=table,
         display_name=base.replace("_", " "),
         description=f"Extract from {conn.name}"
-        + (f" ({body.schema_name or 'public'}.{body.table})" if body.table else ""),
+        + (f" ({body.schema_name}.{body.table})" if body.table and body.schema_name else "")
+        + (f" ({body.table})" if body.table and not body.schema_name else ""),
         storage_key=key,
         row_count=rows,
         columns=columns,
@@ -181,11 +172,21 @@ def refresh_extract(
     dataset = db.get(Dataset, dataset_id)
     if dataset is None or dataset.workspace_id != access.workspace.id:
         raise HTTPException(404, "Dataset not found.")
+    if dataset.data_model_id and dataset.source_query:
+        from inferra.api.data_models import publish_nodes
+        from inferra.db.models import DataModel
+
+        model = db.get(DataModel, dataset.data_model_id)
+        if model is None:
+            raise HTTPException(400, "The data model behind this dataset was deleted.")
+        publish_nodes(db, model, [dataset.source_query], access.user.id)
+        db.refresh(dataset)
+        return dataset_out(dataset)
     if not dataset.connection_id or not dataset.source_query:
-        raise HTTPException(400, "Only extracts from a connection can be refreshed.")
+        raise HTTPException(400, "Only extracts and published data model nodes can be refreshed.")
     conn = _get(db, access, dataset.connection_id)
     try:
-        rows, columns = _run_extract(db, conn, json.loads(dataset.source_query), dataset.storage_key)
+        rows, columns = _run_extract(conn, json.loads(dataset.source_query), dataset.storage_key)
     except QueryError as exc:
         raise HTTPException(400, str(exc)) from exc
     dataset.row_count, dataset.columns = rows, columns

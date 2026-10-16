@@ -41,6 +41,7 @@ class DatasetOut(ORM):
     has_profile: bool = False
     created_at: datetime
     connection_id: str | None = None
+    data_model_id: str | None = None
     synced_at: datetime | None = None
 
 

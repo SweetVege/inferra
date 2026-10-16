@@ -26,6 +26,9 @@ dependencies = [
   "scikit-learn>=1.9.1",
   "lightgbm>=4.7.0",
   "cryptography>=50.0.2",
+  "google-cloud-bigquery>=3.40",
+  "snowflake-connector-python>=4.0,<5",
+  "pyyaml>=6.0",
 ]
 
 [dependency-groups]

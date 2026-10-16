@@ -2,12 +2,13 @@
 
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from inferra import storage
-from inferra.db.models import Artifact, Model, Run, RunEvent, Step, ToolCall
+from inferra.db.models import Artifact, DataModel, Model, Run, RunEvent, Step, ToolCall, utcnow
 from inferra.llm.gateway import Usage
-from inferra.tools.base import ArtifactDraft, ModelDraft
+from inferra.tools.base import ArtifactDraft, ModelDraft, ProjectDraft
 
 
 class Recorder:
@@ -47,6 +48,21 @@ class Recorder:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(draft.payload)
         storage.put_file(model.storage_key, path)
+        self.db.commit()
+        return model.id
+
+    def data_model(self, draft: ProjectDraft) -> str:
+        """Save the run's data model as a draft. Rebuilding in the same run updates it in place."""
+        model = self.db.scalars(
+            select(DataModel).where(DataModel.run_id == self.run.id).order_by(DataModel.created_at)
+        ).first()
+        if model is None:
+            model = DataModel(
+                workspace_id=self.run.workspace_id, run_id=self.run.id, created_by=self.run.created_by
+            )
+            self.db.add(model)
+        model.name, model.description, model.nodes = draft.name, draft.description, draft.nodes
+        model.last_build, model.built_at, model.updated_at = draft.build, utcnow(), utcnow()
         self.db.commit()
         return model.id
 

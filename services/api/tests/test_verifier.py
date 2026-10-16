@@ -432,3 +432,23 @@ def test_labels_in_cited_results_may_be_repeated() -> None:
         artifacts,
     )
     assert "50" in check(sql_number, "number_grounding").detail
+
+
+def test_failing_data_model_tests_must_be_disclosed() -> None:
+    artifacts = {
+        "m": {
+            "kind": "data_model",
+            "data": {"tests_failed": 1, "summary": {"tests": 18}, "nodes": [{"row_count": 6573}]},
+        }
+    }
+    evidence = [{"artifact_id": "m", "path": "nodes.0.row_count", "value": 6573}]
+    hidden = verify_insight(draft("The fact has 6,573 rows.", evidence, confidence="high"), artifacts)
+    assert not check(hidden, "model_tests").passed
+    disclosed = verify_insight(
+        draft("The fact has 6,573 rows.", evidence, caveats=["One test fails on missing customers."]),
+        artifacts,
+    )
+    assert check(disclosed, "model_tests").passed
+    clean = {"m": {**artifacts["m"], "data": {**artifacts["m"]["data"], "tests_failed": 0}}}
+    v = verify_insight(draft("The fact has 6,573 rows.", evidence, confidence="high"), clean)
+    assert v.verified and all(c.name != "model_tests" for c in v.checks)

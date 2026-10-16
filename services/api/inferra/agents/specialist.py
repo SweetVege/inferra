@@ -28,7 +28,16 @@ SPECIALISTS: dict[str, AgentSpec] = {
         "data",
         "Data Agent",
         prompts.DATA_AGENT,
-        ("list_tables", "list_metrics", "profile_dataset", "summarize_column", "run_sql", "compute_metric"),
+        (
+            "list_tables",
+            "list_metrics",
+            "profile_dataset",
+            "summarize_column",
+            "run_sql",
+            "compute_metric",
+            "analyze_keys",
+            "find_relationships",
+        ),
     ),
     "analyst": AgentSpec(
         "analyst",
@@ -72,6 +81,20 @@ SPECIALISTS: dict[str, AgentSpec] = {
             "segment_effects",
             "bayesian_ab",
             "sequential_test",
+        ),
+    ),
+    "modeler": AgentSpec(
+        "modeler",
+        "Data Modeler",
+        prompts.MODELER_AGENT,
+        (
+            "list_tables",
+            "summarize_column",
+            "run_sql",
+            "analyze_keys",
+            "find_relationships",
+            "suggest_star_schema",
+            "build_data_model",
         ),
     ),
 }
@@ -177,6 +200,12 @@ def _execute(tool, use, step, spec, ctx, rec, produced) -> dict[str, Any]:  # ty
             output.artifact.data["model_id"] = model_id
         if isinstance(output.result, dict):
             output.result["model_id"] = model_id
+    if output.project is not None:
+        data_model_id = rec.data_model(output.project)
+        if output.artifact is not None:
+            output.artifact.data["data_model_id"] = data_model_id
+        if isinstance(output.result, dict):
+            output.result["data_model_id"] = data_model_id
     if output.artifact is not None:
         artifact = rec.artifact(step, output.artifact)
         artifact_id = artifact.id

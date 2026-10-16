@@ -174,7 +174,7 @@ function ClarificationPanel({ run, editable, onAnswer }: { run: RunDetail; edita
   );
 }
 
-const FEATURED = new Set(["cuped", "ab_test", "power", "did", "psm", "forecast", "model", "regression", "anomalies", "decomposition", "metric"]);
+const FEATURED = new Set(["data_model", "keys", "cuped", "ab_test", "power", "did", "psm", "forecast", "model", "regression", "anomalies", "decomposition", "metric"]);
 
 function ResultCard({ artifact, defaultOpen }: { artifact: Artifact; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);

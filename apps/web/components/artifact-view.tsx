@@ -1,5 +1,6 @@
 "use client";
 
+import { DataModelArtifact, KeysView, RelationshipsView } from "@/components/data-model-views";
 import { DataTable } from "@/components/data-table";
 import { AbTestView, BaselineView, BayesianView, PowerView, SegmentView, SequentialView, SrmView } from "@/components/experiment-views";
 import { AnomalyView, DecompositionView, MetricView } from "@/components/metric-views";
@@ -7,7 +8,7 @@ import { DidView, ForecastView, ModelView, PsmView, RegressionView } from "@/com
 import { Findings } from "@/components/profile-view";
 import { CodeBlock } from "@/components/ui";
 import { formatNumber } from "@/lib/format";
-import type { Artifact, Finding } from "@/lib/types";
+import type { Artifact, BuildResult, Finding } from "@/lib/types";
 
 export function ArtifactView({ artifact }: { artifact: Artifact }) {
   const d = artifact.data as Record<string, unknown>;
@@ -56,6 +57,9 @@ export function ArtifactView({ artifact }: { artifact: Artifact }) {
   if (artifact.kind === "psm") return <PsmView d={d} />;
   if (artifact.kind === "forecast") return <ForecastView d={d} />;
   if (artifact.kind === "model") return <ModelView d={d} />;
+  if (artifact.kind === "data_model") return <DataModelArtifact d={artifact.data as unknown as BuildResult} />;
+  if (artifact.kind === "keys") return <KeysView d={artifact.data as unknown as Parameters<typeof KeysView>[0]["d"]} />;
+  if (artifact.kind === "relationships") return <RelationshipsView d={artifact.data as unknown as Parameters<typeof RelationshipsView>[0]["d"]} />;
   if (artifact.kind === "correlations") {
     return <DataTable columns={["a", "b", "r", "n"]} rows={d.pairs as Record<string, unknown>[]} />;
   }

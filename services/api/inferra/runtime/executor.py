@@ -28,6 +28,7 @@ AGENT_TITLES = {
     "insight": "Insight Agent",
     "experiment": "Experiment Agent",
     "ml": "ML Agent",
+    "modeler": "Data Modeler",
 }
 
 

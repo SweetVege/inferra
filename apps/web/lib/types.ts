@@ -53,6 +53,7 @@ export interface Dataset {
   has_profile: boolean;
   created_at: string;
   connection_id: string | null;
+  data_model_id: string | null;
   synced_at: string | null;
 }
 
@@ -304,11 +305,13 @@ export interface MetricValues {
   series: { period: string; value: number | null }[];
 }
 
+export type ConnectionKind = "postgres" | "bigquery" | "snowflake";
+
 export interface Connection {
   id: string;
   name: string;
-  kind: string;
-  config: { host: string; port: number; database: string; user: string; sslmode: string };
+  kind: ConnectionKind;
+  config: Record<string, string | number | null>;
   created_at: string;
 }
 
@@ -316,7 +319,98 @@ export interface SourceTable {
   schema: string;
   table: string;
   type: string;
-  estimated_rows: number;
+  estimated_rows: number | null;
+}
+
+export type Layer = "staging" | "dimension" | "fact" | "mart";
+
+export interface TestSpec {
+  type: "unique" | "not_null" | "accepted_values" | "relationships";
+  values?: string[] | null;
+  to?: string | null;
+  field?: string | null;
+  severity?: "error" | "warn";
+}
+
+export interface NodeSpec {
+  name: string;
+  layer: Layer;
+  description: string;
+  sql: string;
+  materialized: "table" | "view";
+  grain: string[];
+  columns: { name: string; description: string; tests: TestSpec[] }[];
+}
+
+export interface BuiltNode {
+  name: string;
+  layer: Layer;
+  description: string;
+  depends_on: string[];
+  sql: string;
+  grain: string[];
+  status: "ok" | "error" | "skipped";
+  error?: string;
+  row_count?: number;
+  columns?: { name: string; type: string; description: string }[];
+  preview?: Record<string, unknown>[];
+}
+
+export interface TestResult {
+  id: string;
+  node: string;
+  column: string | null;
+  test: string;
+  description: string;
+  severity: "error" | "warn";
+  status: "pass" | "fail" | "warn" | "error" | "skipped";
+  failures: number | null;
+  sample?: Record<string, unknown>[];
+  error?: string;
+  sql?: string;
+}
+
+export interface BuildSummary {
+  nodes: number;
+  nodes_built: number;
+  nodes_failed: number;
+  nodes_skipped: number;
+  tests: number;
+  tests_passed: number;
+  tests_failed: number;
+  tests_warned: number;
+  duration_ms: number;
+}
+
+export interface BuildResult {
+  name: string;
+  sources: { name: string; row_count: number | null; columns: number }[];
+  nodes: BuiltNode[];
+  edges: { from: string; to: string }[];
+  tests: TestResult[];
+  summary: BuildSummary;
+  build_ok: boolean;
+  data_model_id?: string;
+}
+
+export interface DataModelSummary {
+  id: string;
+  name: string;
+  description: string;
+  run_id: string | null;
+  created_at: string;
+  updated_at: string;
+  built_at: string | null;
+  node_count: number;
+  summary: BuildSummary | null;
+  stale: boolean;
+}
+
+export interface DataModelDetail extends DataModelSummary {
+  nodes: NodeSpec[];
+  last_build: BuildResult | null;
+  published: { id: string; table_name: string; node: string; row_count: number; synced_at: string | null }[];
+  sources: string[];
 }
 
 export interface InsightFeedItem extends Insight {

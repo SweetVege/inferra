@@ -46,12 +46,13 @@ The API and the worker are the same Python codebase started in two modes (`api`,
 
 ## 3. The agent team
 
-Six roles. Each specialist is just **a system prompt + an allowed tool set + a step contract.** No agent framework is required to understand them.
+Seven roles. Each specialist is just **a system prompt + an allowed tool set + a step contract.** No agent framework is required to understand them.
 
 | Agent | Role | Example tools |
 |---|---|---|
 | **Orchestrator** | Understands the goal, asks clarifying questions, instantiates a workflow, dispatches steps, re-plans on failure | `classify_intent`, `list_datasets`, `instantiate_workflow` |
-| **Data Agent** | Finds and prepares data: schema discovery, profiling, joins, cleaning, SQL, semantic and dimensional modeling | `profile_dataset`, `run_sql` (read-only), `suggest_join_keys`, `propose_star_schema` |
+| **Data Agent** | Finds and checks data: schema discovery, profiling, keys and joins, data quality, SQL | `profile_dataset`, `run_sql` (read-only), `analyze_keys`, `find_relationships` |
+| **Data Modeler** | Dimensional modeling: designs a star schema, writes the SQL transforms and tests, builds and fixes them | `analyze_keys`, `find_relationships`, `suggest_star_schema`, `build_data_model` |
 | **Analyst Agent** | Descriptive and diagnostic analysis plus statistical modeling | `compute_metric`, `segment_breakdown`, `funnel`, `retention`, `decompose_metric_change`, `fit_regression`, `diff_in_diff`, `propensity_match`, `forecast` |
 | **Experiment Agent** | A/B test design and analysis | `power_analysis`, `srm_check`, `ab_test`, `cuped_adjust`, `sequential_test`, `bayesian_ab`, `multiple_testing_correct` |
 | **ML Agent** | Predictive modeling | `build_features`, `train_baseline`, `train_gbm`, `evaluate_model`, `explain_shap`, `write_model_card` |
@@ -105,7 +106,7 @@ The Orchestrator classifies the goal into one intent and instantiates the matchi
 | `estimate_effect` | "Did the loyalty program increase spend?" (observational) | prepare panel → Data · DiD / PSM / regression → Analyst · insights (with causal caveats) → Insight |
 | `predict` | "Predict which users will churn" | build features → Data · train + evaluate + explain → ML · insights + model card → Insight |
 | `forecast` | "Forecast next month's orders" | prepare series → Data · forecast with intervals → Analyst · insights → Insight |
-| `model_data` | "Turn these raw tables into an analytics model" | profile + key discovery → Data · propose star schema + SQL transforms + tests → Data · summary → Insight |
+| `model_data` | "Turn these raw tables into an analytics model" | profile + grain, entities, joins → Data · design star schema, build, test, fix → Data Modeler · insights → Insight |
 
 The Orchestrator may add, drop, or parameterize steps within a template (for example, skip CUPED when no pre-period covariate exists), but it cannot create a step type that has no owning agent. If no intent fits with enough confidence, it asks the user rather than guessing.
 
@@ -175,6 +176,7 @@ The **Verifier** is deterministic code that runs on every draft:
 8. **Labels.** Numbers inside category labels of cited results (a version "5.2", a date) may be repeated without a citation; free text such as SQL is excluded.
 9. **Assumptions.** Causal wording from an observational method (difference-in-differences, matching) needs a passing method check (parallel pre-trends, covariate balance) and a caveat naming the identifying assumption.
 10. **Held-out metrics.** Model performance must be cited from holdout or cross-validation results, never training metrics; forecasts must be cited with their prediction interval.
+11. **Model tests.** An insight citing a data model whose build has failing tests must say so in a caveat and cannot be high confidence.
 
 The verifier checks that numbers are grounded and that the wording matches the strength of the evidence; it cannot judge whether the reasoning connecting them is right. That is what human review is for.
 
@@ -200,7 +202,11 @@ see where data came from.
 |---|---|---|
 | File upload | MVP | CSV/TSV/Parquet/Excel normalized to Parquet in object storage |
 | Postgres | Phase 3 | **Extracts.** A connection (password encrypted with a key derived from the app secret) pulls a table or a custom query into Parquet. Sessions are read-only (`default_transaction_read_only`) with a statement timeout; custom SQL runs as a subquery on a server-side cursor, which accepts exactly one SELECT. Private and loopback hosts are refused in production. Extracts refresh on demand. |
-| BigQuery, Snowflake | Phase 4 | Same extract model, with a dry-run cost estimate before pulling |
+| BigQuery | Phase 4 | **Extracts** through a service account. Every query is dry-run first: it must be a SELECT, and the bytes it would scan must fit the connection's budget, which is also set as `maximum_bytes_billed` on the real job. |
+| Snowflake | Phase 4 | **Extracts** with a password or key pair. Snowflake has no read-only session flag, so the connection should use a read-only role; on top of that custom SQL is wrapped as a subquery (rejecting DDL and DML), one statement per call, with a two-minute timeout. |
+
+All three sit behind one connector interface (`datasources/connectors.py`: validate settings,
+verify credentials, list tables, extract to Parquet), so a new warehouse is one module.
 
 **Why extracts instead of live pushdown.** Live queries would require either translating every
 tool's SQL into each warehouse dialect or loading DuckDB's network extensions at runtime. Extracts
@@ -218,6 +224,30 @@ a ratio's change between two periods splits into a **mix effect** (segment weigh
 against the baseline average) and a **rate effect** (segment rates moved), and the pieces sum to the
 total change for every dimension. Dimensions are ranked by how much more of the change their top
 segment carries than its share of the volume.
+
+### Data models (dimensional modeling)
+
+A data model is a small dbt-style project: SQL nodes (staging, dimension, fact, mart) that read
+datasets with `{{ source('table') }}` and each other with `{{ ref('node') }}`, plus column tests
+(`unique`, `not_null`, `accepted_values`, `relationships`) and a grain per node.
+
+- **Design.** `analyze_keys` finds a table's grain (single or minimal composite key, by a greedy
+  search over identifier and dimension columns), exact duplicate rows, and entities. An attribute
+  belongs to an entity when the entity determines it (a functional dependency, tolerating up to 2%
+  violating entities, which are reported as attributes that change over time). Entities that
+  determine other entities are transaction headers and stay on the fact; the rest become
+  dimensions. `suggest_star_schema` turns that into a tested staging → dimensions + date dimension
+  → fact project, which the Data Modeler agent (or a person) refines.
+- **Build.** References compile to table names, nodes run in dependency order inside the same
+  sandbox as every other query (each node must be one SELECT, and must declare every table it
+  reads), and a failing node skips only its descendants. Tests run as SQL that returns the failing
+  rows; the build records counts and samples.
+- **Review and publish.** A run's build is saved as a draft data model. People edit nodes, rebuild,
+  and publish chosen nodes as datasets (Parquet) that every other workflow can use; refreshing a
+  published dataset rebuilds it from current sources.
+- **Export.** A zipped dbt-duckdb project: one `.sql` per node, schema YAML with descriptions and
+  tests, a bundled generic test for composite grains (no package downloads), and the source Parquet
+  files. `dbt build` on the demo export reproduces Inferra's test results exactly.
 
 ## 8. Core data model
 
@@ -241,6 +271,9 @@ erDiagram
   Connection ||--o{ Dataset : extracts
   Run ||--o{ Model : trains
   Workspace ||--o{ MetricDefinition : defines
+  Workspace ||--o{ DataModel : designs
+  Run ||--o| DataModel : drafts
+  DataModel ||--o{ Dataset : publishes
 ```
 
 ## 9. Runtime and operations
@@ -261,13 +294,14 @@ inferra/
 │  ├─ inferra/
 │  │  ├─ api/                 # FastAPI routes and response schemas
 │  │  ├─ auth/                # GitHub OAuth, signed-cookie sessions, workspace roles
-│  │  ├─ agents/              # orchestrator.py, specialist.py (Data, Analyst, Experiment, ML), insight.py, prompts.py
+│  │  ├─ agents/              # orchestrator.py, specialist.py (Data, Analyst, Experiment, ML, Modeler), insight.py, prompts.py
 │  │  ├─ workflows/           # intent templates
 │  │  ├─ runtime/             # job queue, run executor, recorder (tool calls, artifacts, events)
-│  │  ├─ tools/               # typed tools: profiling, SQL, metrics, experiments, modeling, ml
+│  │  ├─ tools/               # typed tools: profiling, SQL, metrics, experiments, modeling, ml, datamodel
+│  │  ├─ transform/           # data models: compile, build + tests, star-schema design, dbt export
 │  │  ├─ metrics_layer.py     # metric definitions -> tool specs
 │  │  ├─ verify/              # deterministic insight verifier
-│  │  ├─ datasources/         # DataSource protocol, sandboxed DuckDB source, Postgres extracts
+│  │  ├─ datasources/         # DataSource protocol, sandboxed DuckDB source, Postgres/BigQuery/Snowflake extracts
 │  │  ├─ llm/                 # Claude gateway, scripted client, demo script
 │  │  ├─ db/                  # SQLAlchemy models and sessions
 │  │  └─ seed.py              # demo workspace

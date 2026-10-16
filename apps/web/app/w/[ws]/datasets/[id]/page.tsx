@@ -69,14 +69,22 @@ export default function DatasetPage() {
             <p className="tabular text-sm text-ink-3">
               <code className="font-mono">{dataset.table_name}</code> · {formatNumber(dataset.row_count)} rows · {dataset.columns.length} columns
               {dataset.original_filename && ` · ${dataset.original_filename}`}
-              {dataset.synced_at && ` · extracted ${timeAgo(dataset.synced_at)}`}
+              {dataset.synced_at && ` · ${dataset.data_model_id ? "built" : "extracted"} ${timeAgo(dataset.synced_at)}`}
+              {dataset.data_model_id && (
+                <>
+                  {" · "}
+                  <Link href={`/w/${ws}/data-models/${dataset.data_model_id}`} className="text-accent hover:underline">
+                    from a data model
+                  </Link>
+                </>
+              )}
             </p>
           </div>
           {editable && (
             <div className="flex gap-2">
-              {dataset.connection_id && (
+              {(dataset.connection_id || dataset.data_model_id) && (
                 <Button size="sm" loading={refreshing} onClick={() => void refresh()}>
-                  <RefreshCw className="size-4" aria-hidden /> Refresh extract
+                  <RefreshCw className="size-4" aria-hidden /> {dataset.data_model_id ? "Rebuild" : "Refresh extract"}
                 </Button>
               )}
               <Button variant="danger" size="sm" onClick={() => void remove()}>

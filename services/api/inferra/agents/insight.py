@@ -75,6 +75,20 @@ def artifact_view(artifact: Artifact) -> dict[str, Any]:
                 for k, v in data.get("columns", {}).items()
             },
         }
+    if artifact.kind == "data_model":
+        # Keep list positions intact so paths still resolve against the stored artifact.
+        data = {
+            **data,
+            "nodes": [
+                {k: v for k, v in n.items() if k not in {"sql", "preview"}}
+                | {"columns": [c["name"] for c in n.get("columns", [])]}
+                for n in data.get("nodes", [])
+            ],
+            "tests": [
+                {k: v for k, v in t.items() if k != "sql"} | {"sample": (t.get("sample") or [])[:2]}
+                for t in data.get("tests", [])
+            ],
+        }
     text = json.dumps(data, default=str)
     if len(text) > MAX_ARTIFACT_CHARS and "rows" in data:
         data = {**data, "rows": data["rows"][:25], "note": "first 25 rows shown"}

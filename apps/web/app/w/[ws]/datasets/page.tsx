@@ -99,7 +99,9 @@ export default function DatasetsPage() {
                     <p className="truncate font-medium">{d.display_name}</p>
                     <code className="font-mono text-xs text-ink-3">{d.table_name}</code>
                   </div>
-                  <Badge tone={d.source_kind === "postgres" ? "accent" : "neutral"}>{d.source_kind}</Badge>
+                  <Badge tone={d.source_kind === "file" ? "neutral" : d.source_kind === "model" ? "good" : "accent"}>
+                    {d.source_kind === "model" ? "data model" : d.source_kind}
+                  </Badge>
                 </div>
                 {d.description && <p className="mt-2 line-clamp-2 text-sm text-ink-2">{d.description}</p>}
                 <p className="tabular mt-3 text-xs text-ink-3">

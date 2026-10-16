@@ -299,6 +299,26 @@ def verify_insight(
             )
         )
 
+    # 10. A data model with failing tests is a finding to disclose, not a clean result.
+    failing_models = [
+        art
+        for _ev, art in cited
+        if art["kind"] == "data_model" and isinstance(art["data"], dict) and art["data"].get("tests_failed")
+    ]
+    if failing_models:
+        caveats = " ".join(draft.get("caveats", []))
+        disclosed = bool(re.search(r"\bfail", caveats, re.I)) and draft.get("confidence") != "high"
+        verdict.checks.append(
+            Check(
+                "model_tests",
+                disclosed,
+                "Failing tests are disclosed."
+                if disclosed
+                else "The cited data model has failing tests; say so in a caveat and do not mark the "
+                "insight high confidence.",
+            )
+        )
+
     experiment_cited = [(ev, art) for ev, art in cited if art["kind"] in EXPERIMENT_KINDS]
     if not experiment_cited:
         return verdict

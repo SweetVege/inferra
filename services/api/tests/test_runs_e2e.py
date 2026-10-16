@@ -166,10 +166,10 @@ def test_roadmap_intents_are_reported_not_improvised(client: TestClient, orders_
             ToolUseBlock(
                 "submit_plan",
                 {
-                    "intent": "model_data",
+                    "intent": "monitor",
                     "dataset_ids": [dataset["id"]],
                     "params": [],
-                    "rationale": "Star schema request.",
+                    "rationale": "A recurring alert request.",
                     "confidence": "high",
                 },
             ),
@@ -177,11 +177,11 @@ def test_roadmap_intents_are_reported_not_improvised(client: TestClient, orders_
 
     use_llm(script)
     run = client.post(
-        f"/api/workspaces/{ws}/runs", json={"goal": "Design a star schema for these tables"}
+        f"/api/workspaces/{ws}/runs", json={"goal": "Alert me every Monday if revenue drops"}
     ).json()
     drain()
     run = client.get(f"/api/workspaces/{ws}/runs/{run['id']}").json()
-    assert run["status"] == "unsupported" and "Phase 4" in run["error"]
+    assert run["status"] == "unsupported" and "future release" in run["error"]
 
 
 def test_invalid_plans_are_sent_back_to_the_orchestrator(client: TestClient, orders_csv: Path) -> None:

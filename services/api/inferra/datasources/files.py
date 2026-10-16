@@ -5,6 +5,8 @@ import decimal
 import math
 import re
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +97,19 @@ class FileSource:
 
     def quote(self, identifier: str) -> str:
         return '"' + identifier.replace('"', '""') + '"'
+
+    @contextmanager
+    def session(self) -> Iterator[duckdb.DuckDBPyConnection]:
+        """A sandboxed connection over the views, for multi-statement work such as building a
+        data model. Callers must validate any SQL they run (see `validated`)."""
+        con = self._connect()
+        try:
+            yield con
+        finally:
+            con.close()
+
+    def validated(self, con: duckdb.DuckDBPyConnection, sql: str) -> str:
+        return self._validated(con, sql)
 
     def _connect(self) -> duckdb.DuckDBPyConnection:
         con = duckdb.connect()

@@ -18,7 +18,7 @@ class Param:
 @dataclass(frozen=True)
 class StepTemplate:
     key: str
-    agent: str  # data | analyst | experiment | ml | insight
+    agent: str  # data | analyst | experiment | ml | modeler | insight
     task: str  # may reference {params} with str.format-style placeholders
     depends_on: tuple[str, ...] = ()
     optional: bool = False
@@ -298,10 +298,45 @@ WORKFLOWS: dict[str, Workflow] = {
         Workflow(
             intent="model_data",
             title="Design an analytics data model",
-            description="Propose a star schema with transforms, tests, and lineage.",
-            examples=("Turn these raw tables into an analytics model.",),
+            description="Propose a star schema (facts and dimensions) with SQL transforms, tests, and "
+            "lineage, then build and test it. The result can be published as datasets or exported to dbt.",
+            examples=(
+                "Turn the order lines export into a star schema.",
+                "Model these raw tables for analytics.",
+            ),
+            params=(
+                Param("subject", "The business process to model, e.g. 'order lines' or 'subscriptions'."),
+                Param("requirements", "Anything the user asked for: names, dimensions, rules to test."),
+            ),
+            steps=(
+                StepTemplate(
+                    "inspect",
+                    "data",
+                    "Inspect the source tables for modeling {subject}: profile them, find each table's "
+                    "grain with analyze_keys, and when there are several tables, how they join. Flag "
+                    "duplicates, missing keys, and attributes that are not stable for their entity.",
+                ),
+                StepTemplate(
+                    "model",
+                    "modeler",
+                    "Design a star schema for {subject} (requirements: {requirements}). Build it with "
+                    "build_data_model, fix any node that fails, and report the grain, the dimensions, "
+                    "and the test results, including what the failing rows have in common.",
+                    depends_on=("inspect",),
+                ),
+                StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("inspect", "model")),
+            ),
+        ),
+        Workflow(
+            intent="monitor",
+            title="Monitor a metric on a schedule",
+            description="Re-run a check every day or week and alert when a metric moves unexpectedly.",
+            examples=(
+                "Alert me when conversion drops.",
+                "Check revenue every Monday and tell me if it is off.",
+            ),
             available=False,
-            phase="Phase 4",
+            phase="a future release",
         ),
     ]
 }
