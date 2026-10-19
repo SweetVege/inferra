@@ -73,6 +73,11 @@ def test_explore_run_end_to_end(client: TestClient, orders_csv: Path) -> None:
     assert run["usage"]["requests"] == len(llm.requests)
     kinds = [e["kind"] for e in run["events"]]
     assert kinds[0] == "created" and kinds[-1] == "completed" and "verification" in kinds
+    # Specialists see their remaining tool budget and are told to run the checks they would suggest.
+    specialist = [r for r in llm.requests if r.role == "specialist" and len(r.messages) > 1]
+    notes = [b["text"] for b in specialist[0].messages[-1]["content"] if b.get("type") == "text"]
+    assert notes == ["Tool calls left in this step: 7."]
+    assert "run it now and report what it showed" in specialist[0].system
 
     # Human review: accept one, edit another, reject the third.
     first, second, third = run["insights"]

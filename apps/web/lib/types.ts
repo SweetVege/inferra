@@ -277,7 +277,14 @@ export interface ModelCard {
   task: string;
   target: string;
   algorithm: string;
-  training_data: { table: string; rows: number; train_rows: number; test_rows: number; sampled: boolean };
+  training_data: {
+    table: string;
+    rows: number;
+    train_rows: number;
+    test_rows: number;
+    sampled: boolean;
+    validation?: { split: "random" | "grouped"; group_column?: string; groups?: number; test_groups?: number };
+  };
   features: string[];
   excluded_features: { feature: string; reason: string }[];
   top_drivers: string[];

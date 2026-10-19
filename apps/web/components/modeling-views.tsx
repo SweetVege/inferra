@@ -184,6 +184,12 @@ export function ModelView({ d }: { d: Row }) {
         <Badge>
           {formatNumber(d.n_train)} train · {formatNumber(d.n_test)} holdout
         </Badge>
+        {(d.validation as Row | undefined)?.split === "grouped" && (
+          <Badge>
+            Held out by {String((d.validation as Row).group_column)}: {formatNumber((d.validation as Row).test_groups)} of{" "}
+            {formatNumber((d.validation as Row).groups)} groups unseen in training
+          </Badge>
+        )}
         {typeof d.model_id === "string" && (
           <Link href={`/w/${ws}/models/${d.model_id}`} className="text-xs text-accent hover:underline">
             Open in model registry →

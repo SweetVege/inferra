@@ -268,3 +268,33 @@ def test_lightgbm_threads_follow_the_container_cpu_quota(tmp_path: Path) -> None
     quota.write_text("max 100000\n")
     assert _cpu_threads(cpu_max=str(quota)) == min(2, len(os.sched_getaffinity(0)))
     assert _cpu_threads(cpu_max=str(tmp_path / "missing")) >= 1
+
+
+def test_grouped_validation_holds_out_whole_groups(tmp_path: Path) -> None:
+    # Like weekly sales by store: a per-store trait identifies the store, and most of the signal is the
+    # store's own level. A random split rewards memorizing stores; a grouped split shows the real skill.
+    rng = np.random.default_rng(7)
+    stores, weeks = 40, 50
+    level = rng.normal(0, 3, stores)
+    size = rng.permutation(np.arange(100, 100 + stores * 7, 7))  # unique per store, unrelated to level
+    df = pd.DataFrame({"store": np.repeat(np.arange(stores), weeks), "temp": rng.normal(size=stores * weeks)})
+    df["size"] = size[df.store]
+    df["sales"] = level[df.store] + 0.5 * df.temp + rng.normal(0, 0.5, len(df))
+    ctx = ctx_for(df, tmp_path)
+
+    random = run(ctx, "train_model", target="sales", features=["size", "temp"]).artifact.data
+    grouped = run(
+        ctx, "train_model", target="sales", features=["size", "temp"], group_column="store"
+    ).artifact.data
+    assert random["validation"] == {"split": "random"}
+    v = grouped["validation"]
+    assert v["split"] == "grouped" and v["group_column"] == "store" and v["groups"] == stores
+    assert grouped["n_test"] == v["test_groups"] * weeks  # every held-out store is held out entirely
+    assert random["holdout"]["r2"] > 0.8 > 0.3 > grouped["holdout"]["r2"]
+    assert any("held out entirely" in line for line in grouped["card"]["limitations"])
+
+    # The group column is never a feature, even when listed.
+    listed = run(ctx, "train_model", target="sales", features=["store", "temp"], group_column="store")
+    assert [f["name"] for f in listed.artifact.data["features"]] == ["temp"]
+    with pytest.raises(ToolError, match="at least 10 groups"):
+        run(ctx, "train_model", target="sales", group_column="size", where="store < 5")
