@@ -138,3 +138,37 @@ def test_non_utf8_csv_uploads_are_read(tmp_path: Path, raw: bytes, expected: lis
     first = duckdb.connect().execute(f"SELECT * FROM read_parquet('{dest}') LIMIT 1").fetchone()
     assert [str(v) for v in first] == expected
     assert [p.name for p in dest.parent.iterdir()] == ["data.parquet"]  # no UTF-8 scratch copy left
+
+
+def _convert(tmp_path: Path, csv: str) -> tuple[list[dict[str, str]], list[tuple]]:
+    import duckdb
+
+    src = tmp_path / "dates.csv"
+    src.write_text(csv)
+    dest = tmp_path / "out" / "dates.parquet"
+    _, columns = convert_to_parquet(src, dest)
+    rows = duckdb.connect().execute(f"SELECT * FROM read_parquet('{dest}')").fetchall()
+    return columns, rows
+
+
+def test_text_dates_in_common_formats_become_dates(tmp_path: Path) -> None:
+    import datetime as dt
+
+    csv = (
+        "invoice,us,eu,day_only,ambiguous,label\n"
+        "1,12/1/2010 8:26,25/12/2010,1/31/2011,1/2/2011 8:26,10/1 sale\n"
+        "2,12/19/2011 12:50,3/1/2011,2/1/2011,3/4/2011 9:15,5/5 promo\n"
+    )
+    columns, rows = _convert(tmp_path, csv)
+    types = {c["name"]: c["type"] for c in columns}
+    assert types["us"] == "TIMESTAMP" and types["eu"] == "DATE" and types["day_only"] == "DATE"
+    # Every day is 12 or less, so month-first and day-first both fit: left as text, not guessed.
+    assert types["ambiguous"] == "VARCHAR"
+    assert types["label"] == "VARCHAR"
+    assert rows[0][1] == dt.datetime(2010, 12, 1, 8, 26) and rows[1][1] == dt.datetime(2011, 12, 19, 12, 50)
+    assert rows[0][2] == dt.date(2010, 12, 25) and rows[1][2] == dt.date(2011, 1, 3)
+
+
+def test_a_column_with_one_non_date_stays_text(tmp_path: Path) -> None:
+    columns, _ = _convert(tmp_path, "when\n12/1/2010 8:26\nunknown\n")
+    assert columns == [{"name": "when", "type": "VARCHAR"}]
