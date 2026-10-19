@@ -457,3 +457,15 @@ def test_an_unexpected_tool_error_costs_one_call_not_the_run(monkeypatch: pytest
     result = specialist._execute(tool, use, SimpleNamespace(key="s"), spec, None, rec, [])
     assert result["is_error"] and "internal error (AttributeError" in result["content"]
     assert "AttributeError" in calls[0]["error"]
+
+
+def test_large_training_sets_use_three_folds(tmp_path: Path) -> None:
+    from inferra.tools.ml import n_folds
+
+    assert n_folds(10_000) == 5 and n_folds(80_000) == 3
+    rng = np.random.default_rng(11)
+    n = 60_000
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n)})
+    df["label"] = (rng.random(n) < 1 / (1 + np.exp(-(df.a - 1.5)))).astype(int)
+    data = run(ctx_for(df, tmp_path), "train_model", target="label").artifact.data
+    assert len(data["cv"]["folds"]) == 3 and data["holdout"]["auc"] > 0.65
