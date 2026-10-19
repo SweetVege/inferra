@@ -1,8 +1,8 @@
 """Who may spend the model budget, and how much of it per day.
 
-Agent runs call a paid model, so a public deployment needs limits: an optional allowlist of logins
-and a daily cap per person. Both are checked when a run is created, by a person or by a schedule
-on that person's behalf."""
+Agent runs call a paid model, so a public deployment needs limits: an optional allowlist of logins,
+a daily cap per person, and logins exempt from both (the deployment's owner). They are checked when
+a run is created, by a person or by a schedule on that person's behalf."""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -34,6 +34,8 @@ def runs_today(db: Session, user_id: str) -> int:
 
 def run_quota(db: Session, user: User) -> RunQuota:
     s = get_settings()
+    if user.login.lower() in s.run_unlimited_logins:
+        return RunQuota(True, None, 0)
     allowlist = s.run_allowlist_logins
     limit = s.daily_run_limit or None
     used = runs_today(db, user.id) if limit else 0

@@ -56,6 +56,7 @@ Deploy in this order: each step needs a URL or key from the one before.
    | `INFERRA_LLM_MODEL` / `ANTHROPIC_API_KEY` | a Claude model id and an API key, or leave empty (see below) |
    | `INFERRA_DAILY_RUN_LIMIT` | agent runs per person per UTC day, e.g. `3` (`0` or unset: no limit) |
    | `INFERRA_RUN_ALLOWLIST` | optional: comma-separated GitHub logins allowed to start runs (empty: everyone signed in) |
+   | `INFERRA_RUN_UNLIMITED` | optional: comma-separated GitHub logins exempt from the allowlist and the daily limit, typically your own |
    | `INFERRA_MAX_UPLOAD_MB` | optional: largest upload in MB (default `50`; keep the instance's memory in mind) |
    | `INFERRA_SAMPLE_DATA_ON_SIGNUP` | optional: `false` to start new workspaces empty (default `true`: they get the seven sample datasets) |
    | `INFERRA_GITHUB_CLIENT_ID` / `INFERRA_GITHUB_CLIENT_SECRET` | leave empty until step 6 |
@@ -77,7 +78,8 @@ tens of cents in API usage, depending on the model and the workflow.
 
 - set a monthly spend limit in the Anthropic Console, as the backstop;
 - set `INFERRA_DAILY_RUN_LIMIT` (scheduled re-runs count against the person who created the
-  schedule), and, to keep runs to yourself and people you invite, `INFERRA_RUN_ALLOWLIST`.
+  schedule), and, to keep runs to yourself and people you invite, `INFERRA_RUN_ALLOWLIST`;
+- put your own login in `INFERRA_RUN_UNLIMITED` so the daily limit does not stop your own work.
 
 Everyone can still sign in, upload data, and browse; only starting runs is limited. The Ask page
 shows how many runs are left today, or why runs are unavailable.

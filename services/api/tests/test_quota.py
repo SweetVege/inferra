@@ -135,3 +135,26 @@ def test_uninvited_users_cannot_schedule(
     configure(monkeypatch, INFERRA_RUN_ALLOWLIST="grace")
     res = client.post(f"/api/workspaces/{ws}/schedules", json={"run_id": run["id"]})
     assert res.status_code == 403 and "invited" in res.json()["detail"]
+
+
+def test_unlimited_logins_skip_the_allowlist_and_the_daily_limit(
+    client: TestClient, orders_csv: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configure(
+        monkeypatch,
+        INFERRA_DAILY_RUN_LIMIT="1",
+        INFERRA_RUN_ALLOWLIST="grace",
+        INFERRA_RUN_UNLIMITED="Owner",
+    )
+    use_llm(demo_script)
+
+    ws = login(client, "owner")  # matched case-insensitively
+    upload(client, ws, orders_csv)
+    assert all(start(client, ws).status_code == 201 for _ in range(3))
+    quota = client.get("/api/auth/quota").json()
+    assert quota["allowed"] is True and quota["limit"] is None and quota["remaining"] is None
+
+    ws = login(client, "grace")  # everyone else keeps the limit
+    upload(client, ws, orders_csv)
+    assert start(client, ws).status_code == 201
+    assert start(client, ws).status_code == 429

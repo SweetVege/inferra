@@ -5,6 +5,10 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _logins(value: str) -> set[str]:
+    return {login.strip().lower() for login in value.split(",") if login.strip()}
+
+
 class Settings(BaseSettings):
     """Runtime configuration, read from environment variables prefixed with INFERRA_."""
 
@@ -37,9 +41,11 @@ class Settings(BaseSettings):
 
     # Who may start agent runs, which spend the deployment's model budget. The allowlist is a
     # comma-separated list of logins (empty: everyone signed in); the limit counts runs per person
-    # per UTC day, scheduled re-runs included (0: no limit).
+    # per UTC day, scheduled re-runs included (0: no limit). Logins in run_unlimited (the
+    # deployment's owner, say) may always start runs, with no daily limit.
     run_allowlist: str = ""
     daily_run_limit: int = 0
+    run_unlimited: str = ""
     # New personal workspaces start with the sample datasets, so people can ask right away.
     sample_data_on_signup: bool = True
 
@@ -60,7 +66,11 @@ class Settings(BaseSettings):
 
     @property
     def run_allowlist_logins(self) -> set[str]:
-        return {login.strip().lower() for login in self.run_allowlist.split(",") if login.strip()}
+        return _logins(self.run_allowlist)
+
+    @property
+    def run_unlimited_logins(self) -> set[str]:
+        return _logins(self.run_unlimited)
 
     @property
     def dev_login_enabled(self) -> bool:
