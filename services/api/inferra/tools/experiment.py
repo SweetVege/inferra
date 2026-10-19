@@ -153,7 +153,10 @@ def _column(source: DataSource, table: str, name: str) -> dict[str, str]:
     col = next((c for c in info.columns if c["name"] == name), None)
     if col is None:
         known = ", ".join(c["name"] for c in info.columns)
-        raise ToolError(f"Unknown column '{name}' in {table}. Columns: {known}.")
+        raise ToolError(
+            f"Unknown column '{name}' in {table}. Columns: {known}. To use a column from another table "
+            "or a derived one, define a view with create_view and pass the view's name."
+        )
     return col
 
 

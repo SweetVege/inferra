@@ -83,3 +83,29 @@ def test_binary_columns_are_not_flagged_as_outliers(tmp_path: Path) -> None:
     profile = profile_table(make_source(csv), "orders")
     assert "outlier_count" not in profile["columns"]["flag"]
     assert not [f for f in profile["findings"] if f["issue"] == "outliers"]
+
+
+def test_memory_limit_comes_from_the_container(tmp_path: Path) -> None:
+    from inferra.resources import memory_limit_bytes
+
+    v2, v1 = tmp_path / "memory.max", tmp_path / "limit_in_bytes"
+    v2.write_text("536870912\n")  # a 512 MB instance
+    assert memory_limit_bytes((str(v2), str(v1))) == 512 * 2**20
+    v2.write_text("max\n")
+    assert memory_limit_bytes((str(v2), str(v1))) is None
+    v1.write_text(str(2**63 - 4096))  # cgroup v1's "unlimited"
+    assert memory_limit_bytes((str(tmp_path / "missing"), str(v1))) is None
+
+
+def test_a_query_too_big_for_memory_fails_alone(orders_csv: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from inferra.config import get_settings
+
+    monkeypatch.setenv("INFERRA_DUCKDB_MEMORY_MB", "128")
+    get_settings.cache_clear()
+    source = make_source(orders_csv)
+    limit = source.query("SELECT current_setting('memory_limit') AS m").rows[0]["m"]
+    assert limit.startswith("122") or limit.startswith("128")  # DuckDB reports MiB
+    big = "SELECT count(DISTINCT md5(i::VARCHAR) || repeat('x', 300)) AS n FROM range(4000000) t(i)"
+    with pytest.raises(QueryError, match="Out of Memory"):
+        source.query(big)
+    assert source.query("SELECT count(*) AS n FROM orders").rows[0]["n"] == 2412  # the next query is fine

@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     max_tool_calls_per_step: int = 8
     # A step still working after this long stops with the reason, rather than waiting for recovery.
     step_time_limit_minutes: int = 8
+    duckdb_memory_mb: int = 0  # 0: a share of the container's memory limit
     max_insight_revisions: int = 2
     max_upload_mb: int = 50
     # A planning or running run with no progress for this long was interrupted (e.g. a restart).

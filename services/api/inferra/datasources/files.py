@@ -15,6 +15,7 @@ import pandas as pd
 
 from inferra import storage
 from inferra.datasources.base import QueryError, QueryResult, TableInfo
+from inferra.resources import limit_duckdb
 
 VIEW_NAME = re.compile(r"[a-z][a-z0-9_]{0,59}")
 SUPPORTED_EXTENSIONS = {".csv", ".tsv", ".txt", ".parquet", ".xlsx", ".xls"}
@@ -56,6 +57,7 @@ def convert_to_parquet(source: Path, dest: Path) -> tuple[int, list[dict[str, st
         raise QueryError(f"Unsupported file type '{ext}'. Upload CSV, TSV, Parquet, or Excel.")
     dest.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect()
+    limit_duckdb(con)
     try:
         if ext in {".xlsx", ".xls"}:
             import pandas as pd
@@ -147,6 +149,7 @@ class FileSource:
 
     def _connect(self) -> duckdb.DuckDBPyConnection:
         con = duckdb.connect()
+        limit_duckdb(con)
         for info, key in self._tables:
             path = storage.ensure_local(key)
             con.execute(

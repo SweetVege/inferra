@@ -12,6 +12,7 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from inferra.datasources.base import DataSource
+from inferra.resources import cpu_threads
 from inferra.tools.base import (
     ArtifactDraft,
     ModelDraft,
@@ -39,27 +40,11 @@ GBM_PARAMS = {
     "lambda_l2": 1.0,
     "verbose": -1,
     "seed": SEED,
-    "num_threads": 2,  # lowered to the CPUs this container may use; see _cpu_threads
+    "num_threads": 2,  # lowered to the CPUs this container may use; see cpu_threads
 }
 
 
-def _cpu_threads(most: int = 2, cpu_max: str = "/sys/fs/cgroup/cpu.max") -> int:
-    """Threads LightGBM may use without oversubscribing a CPU-limited container (a 0.1-CPU free
-    instance runs far slower with two spinning OpenMP threads than with one)."""
-    import os
-
-    cpus = float(len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 1)
-    try:
-        with open(cpu_max) as fh:
-            quota, period = fh.read().split()[:2]
-        if quota != "max":
-            cpus = min(cpus, int(quota) / int(period))
-    except (OSError, ValueError):
-        pass
-    return max(1, min(most, int(cpus)))
-
-
-GBM_PARAMS["num_threads"] = _cpu_threads()
+GBM_PARAMS["num_threads"] = cpu_threads()
 MAX_ROUNDS = 2000
 EARLY_STOP = 100
 
