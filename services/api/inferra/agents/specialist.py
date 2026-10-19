@@ -117,6 +117,10 @@ FINISH_STEP = {
 }
 
 
+class StepTimeLimit(RuntimeError):
+    """A step ran past its time limit; the message says what it was doing."""
+
+
 @dataclass
 class StepOutcome:
     summary: str
@@ -141,8 +145,17 @@ def run_specialist(
     produced: list[str] = []
     calls = 0
     nudged = False
+    started = time.monotonic()
+    last_tool: str | None = None
+
+    def check_time() -> None:
+        minutes = settings.step_time_limit_minutes
+        if time.monotonic() - started > minutes * 60:
+            doing = f"after {last_tool}" if last_tool else "before calling any tool"
+            raise StepTimeLimit(f"{spec.title} stopped after {minutes} minutes ({doing}).")
 
     for _ in range(settings.max_tool_calls_per_step + 4):
+        check_time()
         response = llm.create(role="specialist", system=spec.system, tools=definitions, messages=messages)
         rec.usage(response.usage)
         messages.append({"role": "assistant", "content": response.content})
@@ -166,7 +179,9 @@ def run_specialist(
             if calls >= settings.max_tool_calls_per_step:
                 results.append(_error(use.id, "Tool budget for this step is used up. Call finish_step."))
                 continue
+            check_time()
             calls += 1
+            last_tool = use.name
             results.append(_execute(tools[use.name], use, step, spec, ctx, rec, produced))
         messages.append({"role": "user", "content": results})
 

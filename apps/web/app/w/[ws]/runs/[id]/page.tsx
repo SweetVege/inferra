@@ -52,6 +52,34 @@ function ToolCallRow({ call, artifact, onShow }: { call: ToolCall; artifact?: Ar
   );
 }
 
+// Timestamps are UTC; one without a zone (SQLite in development) is read as UTC too.
+const utc = (iso: string) => new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`).getTime();
+
+function elapsed(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+/** What a running step is doing now: a tool that has started but not finished, or a model turn. */
+function CurrentActivity({ run, step }: { run: RunDetail; step: Step }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const started = run.events.filter((e) => e.kind === "tool_started" && e.data.step === step.key);
+  const done = run.tool_calls.filter((c) => c.step_id === step.id);
+  const tool = started.length > done.length ? started[started.length - 1] : null;
+  const since = tool ? tool.created_at : (done[done.length - 1]?.created_at ?? step.started_at);
+  return (
+    <li className="flex items-center gap-2 rounded-lg border border-dashed border-line px-3 py-2 text-sm text-ink-2" aria-live="polite">
+      <Loader2 className="size-4 animate-spin text-accent" aria-hidden />
+      {tool ? <code className="font-mono text-[13px]">{String(tool.data.tool)}</code> : <span>Waiting for the model</span>}
+      {since && <span className="tabular ml-auto text-xs text-ink-3">{tool ? "running" : "thinking"} · {elapsed(now - utc(since))}</span>}
+    </li>
+  );
+}
+
 function Timeline({ run, onShow }: { run: RunDetail; onShow: (id: string) => void }) {
   return (
     <ol className="space-y-3">
@@ -70,11 +98,12 @@ function Timeline({ run, onShow }: { run: RunDetail; onShow: (id: string) => voi
                   <p className="text-sm text-ink-2">{step.task}</p>
                   {step.summary && <Markdown className="rounded-lg bg-surface-2 px-3 py-2 text-sm">{step.summary}</Markdown>}
                   {step.error && <p className="text-sm text-bad">{step.error}</p>}
-                  {calls.length > 0 && (
+                  {(calls.length > 0 || step.status === "running") && (
                     <ul className="space-y-1.5">
                       {calls.map((c) => (
                         <ToolCallRow key={c.id} call={c} artifact={run.artifacts.find((a) => a.id === c.artifact_id)} onShow={onShow} />
                       ))}
+                      {step.status === "running" && run.status === "running" && <CurrentActivity run={run} step={step} />}
                     </ul>
                   )}
                 </div>

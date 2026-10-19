@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from inferra.agents.insight import write_insights
 from inferra.agents.orchestrator import dataset_catalog, plan_goal
-from inferra.agents.specialist import SPECIALISTS, run_specialist
+from inferra.agents.specialist import SPECIALISTS, StepTimeLimit, run_specialist
 from inferra.config import get_settings
 from inferra.datasources.registry import datasource_for
 from inferra.db.models import Artifact, Dataset, Insight, Run, Step, Workspace
@@ -250,7 +250,7 @@ def execute_run(db: Session, payload: dict[str, Any]) -> None:
             db.commit()
             completed.append(step)
             rec.event("step_completed", f"{title} finished", step=step.key)
-        except LLMUnavailable as exc:
+        except (LLMUnavailable, StepTimeLimit) as exc:  # their messages are written for people
             step.status, step.error, step.finished_at = "failed", str(exc), _now()
             db.commit()
             _finish(db, run, "failed", str(exc))

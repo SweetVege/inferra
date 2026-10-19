@@ -63,7 +63,7 @@ class AnthropicLLM:
         import anthropic
 
         self._anthropic = anthropic
-        self._client = anthropic.Anthropic()
+        self._client = anthropic.Anthropic(timeout=get_settings().llm_timeout_seconds, max_retries=1)
         self.model = model
 
     def create(
@@ -89,6 +89,11 @@ class AnthropicLLM:
                 fallbacks="default",
             ) as stream:
                 message = stream.get_final_message()
+        except self._anthropic.APITimeoutError as exc:
+            seconds = s.llm_timeout_seconds
+            raise LLMUnavailable(
+                f"The model did not respond within {seconds} seconds (tried twice)."
+            ) from exc
         except self._anthropic.APIStatusError as exc:
             raise LLMUnavailable(f"Model request failed ({exc.status_code}): {exc.message}") from exc
         except self._anthropic.APIConnectionError as exc:
