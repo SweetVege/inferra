@@ -33,3 +33,9 @@ def test_fill_keeps_clauses_whose_params_are_all_set() -> None:
     task = "Check {a}[ by {b}][ and {b} with {c}]."
     assert fill(task, {"a": "A", "b": "B"}) == "Check A by B."
     assert fill(task, {"a": "A", "b": "B", "c": "C"}) == "Check A by B and B with C."
+
+
+def test_comma_separated_params_get_a_space() -> None:
+    assert fill("Guardrails: {g}. Traffic: {t}.", {"g": "retention_1,sum_gamerounds", "t": "10,000"}) == (
+        "Guardrails: retention_1, sum_gamerounds. Traffic: 10,000."
+    )

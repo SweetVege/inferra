@@ -384,7 +384,10 @@ def fill(task: str, values: dict[str, str]) -> str:
         return inner if all(values.get(k) for k in _PLACEHOLDER.findall(inner)) else ""
 
     text = _OPTIONAL.sub(clause, task)
-    text = _PLACEHOLDER.sub(lambda m: values.get(m.group(1)) or "not specified", text)
+    # "retention_1,sum_gamerounds" reads as "retention_1, sum_gamerounds"; "10,000" is left alone.
+    text = _PLACEHOLDER.sub(
+        lambda m: re.sub(r",(?=[^\s\d])", ", ", values.get(m.group(1)) or "not specified"), text
+    )
     return re.sub(r" {2,}", " ", text).strip()
 
 
