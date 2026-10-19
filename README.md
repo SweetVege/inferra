@@ -6,6 +6,10 @@
 
 **[Live demo](https://inferra-demo.vercel.app)** · **[Sample report](https://inferra-demo.vercel.app/r/I3ok7ujo53s8UK0GWsOAsMhEXzse2qwD)** · no sign-up needed. The demo is read-only and shows completed runs, a shared report, and a metric monitor. If it has been idle, the first visit can take up to a minute while the API wakes up.
 
+![A completed A/B test run: a verified insight with its evidence, method, caveats, and the verifier's checks](docs/images/run.png)
+
+*A completed run in the demo workspace. Each insight cites the tool results its numbers come from, states its method and caveats, and lists the checks the verifier ran.*
+
 ## How it works
 
 1. **Ask.** "Why did signup conversion drop in late September?"
@@ -25,6 +29,33 @@ flowchart LR
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/PRD.md](docs/PRD.md) for scope and roadmap.
+
+## What it looks like
+
+All screenshots are from the [live demo](https://inferra-demo.vercel.app).
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/images/workflow.png" alt="The run's workflow: each agent's steps and tool calls, with the SQL behind an A/B test">
+<p><b>Every step is on the record.</b> The run page shows each agent's tool calls with their inputs, SQL, and outputs, so any number in an insight can be traced back to the query that produced it.</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/images/model.png" alt="A churn model card: holdout AUC, the baseline it beat, SHAP feature importance, and calibration">
+<p><b>Models come with a model card.</b> Gradient-boosted trees and a linear baseline are compared on held-out data (here the simpler model won); the winner is registered with its SHAP explanations and calibration, ready for batch scoring.</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/images/data-model.png" alt="A star schema built by the Data Modeler: lineage graph and data tests">
+<p><b>Raw tables become a tested star schema.</b> The Data Modeler finds each table's grain and keys, builds facts and dimensions with data tests and lineage, keeps failing tests in view, and exports the result as a dbt project.</p>
+</td>
+<td width="50%" valign="top">
+<img src="docs/images/report.png" alt="A shared report: summary, verified findings, and charts, opened from a public link">
+<p><b>Reviewed insights become a report.</b> Accepted findings are published as a frozen version with charts and a method appendix, shared by a revocable link that needs no account. <a href="https://inferra-demo.vercel.app/r/I3ok7ujo53s8UK0GWsOAsMhEXzse2qwD">Open it.</a></p>
+</td>
+</tr>
+</table>
 
 ## On real data
 
@@ -58,7 +89,7 @@ Requirements: Python 3.12+ with [uv](https://docs.astral.sh/uv/), Node 22 with p
 cd services/api
 cp .env.example .env          # set INFERRA_LLM_MODEL and ANTHROPIC_API_KEY to enable agent runs
 uv sync
-uv run python -m inferra.seed # demo workspace with six completed runs and defined metrics
+uv run python -m inferra.seed # demo workspace with eight completed runs, a shared report, and a monitor
 uv run uvicorn inferra.main:app --reload
 
 # Web (http://localhost:3000)
