@@ -173,3 +173,18 @@ def test_check_metric_skips_partial_periods_and_respects_direction(tmp_path: Pat
     assert up is not None and up.data["status"] == "ok"
     loose = check.run(ctx, {"metric": "sessions", "grain": "week", "threshold": 0.5}).artifact
     assert loose is not None and loose.data["status"] == "ok"
+
+
+def test_check_metric_uses_the_latest_week_of_weekly_stamped_data(tmp_path: Path) -> None:
+    import pandas as pd
+
+    from inferra.tools.base import get_tool
+    from tests.test_metric_tools import ctx_for
+
+    fridays = pd.date_range("2025-10-03", periods=20, freq="W-FRI")  # one row per week, dated Friday
+    sessions = [100.0] * 19 + [60.0]  # the latest, complete week dropped
+    ctx = ctx_for(pd.DataFrame({"date": fridays.date, "sessions": sessions, "signups": 1}), tmp_path)
+    check = get_tool("check_metric").run(ctx, {"metric": "sessions", "grain": "week", "direction": "down"})
+    data = check.artifact.data  # type: ignore[union-attr]
+    assert data["excluded_partial_period"] is None
+    assert data["latest"]["value"] == pytest.approx(60.0) and data["status"] == "alert"
