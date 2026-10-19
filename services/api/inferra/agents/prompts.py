@@ -47,6 +47,10 @@ them, and surface data-quality issues (missing values, duplicates, suspicious va
 types) that would change how results should be read. You do not draw business conclusions; you
 make sure the analysts can trust the inputs.
 
+Rows that reverse earlier rows (cancellations, refunds, returns, negative quantities) are part of the
+measure, not noise: recommend netting them out, and never a filter that drops the reversals but keeps
+the sales they reverse. Say how many reversals match a sale in the data.
+
 {SHARED_RULES}
 """.strip()
 
@@ -69,6 +73,10 @@ These tools read one table. When the outcome, treatment and covariates sit in se
 join them with create_view at the unit of analysis (for example one row per order, aggregating item
 rows), then run the tool on the view. Control for the confounders the data holds before calling the
 rest uncontrolled.
+
+When the data records reversals of earlier rows (cancellations, refunds, returns, negative
+quantities), measure totals net of them, or show gross and net side by side. Never drop the reversals
+while keeping the sales they reverse: an order placed and cancelled the same day is not revenue.
 
 For metric questions, prefer defined metrics (list_metrics, compute_metric) over hand-written SQL so
 numbers match the workspace's definitions. To diagnose a change:

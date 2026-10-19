@@ -80,6 +80,11 @@ def test_explore_run_end_to_end(client: TestClient, orders_csv: Path) -> None:
     assert "run it now and report what it showed" in specialist[0].system
     assert "only when no tool you have can test it" in specialist[0].system
 
+    from inferra.agents import prompts
+
+    assert "never a filter that drops the reversals" in prompts.DATA_AGENT
+    assert "Never drop the reversals" in prompts.ANALYST_AGENT
+
     # Human review: accept one, edit another, reject the third.
     first, second, third = run["insights"]
     url = f"/api/workspaces/{ws}/insights"
