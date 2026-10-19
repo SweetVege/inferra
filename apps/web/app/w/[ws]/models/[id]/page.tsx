@@ -100,7 +100,7 @@ export default function ModelPage() {
             ["Target", card.target],
             [
               "Training data",
-              `${card.training_data.table}: ${formatNumber(card.training_data.rows)} rows (${formatNumber(card.training_data.train_rows)} train, ${formatNumber(card.training_data.test_rows)} holdout)${card.training_data.sampled ? ", sampled" : ""}`,
+              `${card.training_data.table}: ${formatNumber(card.training_data.rows)} rows (${formatNumber(card.training_data.train_rows)} train, ${formatNumber(card.training_data.test_rows)} holdout)${card.training_data.sampled ? ", sampled" : ""}${card.training_data.validation?.split === "grouped" ? `; holdout is ${card.training_data.validation.test_groups} of ${card.training_data.validation.groups} ${card.training_data.validation.group_column} groups, unseen in training` : ""}`,
             ],
             ["Features", card.features.join(", ")],
             ["Top drivers", card.top_drivers.join(", ")],

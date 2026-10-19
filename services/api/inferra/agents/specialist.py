@@ -183,6 +183,8 @@ def run_specialist(
             calls += 1
             last_tool = use.name
             results.append(_execute(tools[use.name], use, step, spec, ctx, rec, produced))
+        left = settings.max_tool_calls_per_step - calls
+        results.append({"type": "text", "text": f"Tool calls left in this step: {left}."})
         messages.append({"role": "user", "content": results})
 
     return StepOutcome("The step stopped after reaching its turn limit.", produced)

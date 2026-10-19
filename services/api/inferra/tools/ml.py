@@ -213,6 +213,14 @@ class TrainInput(BaseModel):
     model_name: str | None = Field(default=None, description="Name for the model registry.")
     test_size: float = Field(default=0.2, ge=0.1, le=0.4)
     where: str | None = None
+    group_column: str | None = Field(
+        default=None,
+        description=(
+            "Keep all rows of one group (for example a store or customer) on the same side of every "
+            "split, so the scores measure performance on groups the model has not seen. The column is "
+            "not used as a feature."
+        ),
+    )
 
 
 def _screen(
@@ -271,22 +279,35 @@ def _screen(
     "Train and evaluate a predictive model for a binary or numeric target. Screens features (drops "
     "dates, identifiers, and likely target leakage), trains a gradient-boosted tree model and a linear "
     "baseline, reports 5-fold cross-validation and held-out test metrics against the baseline and a naive "
-    "predictor, explains predictions with SHAP values, writes a model card, and registers the model for "
-    "batch scoring. Creates a 'model' artifact.",
+    "predictor (split at random, or by whole groups with group_column), explains predictions with SHAP "
+    "values, writes a model card, and registers the model for batch scoring. Creates a 'model' artifact.",
     TrainInput,
 )
 def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
     import lightgbm as lgb
-    from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
+    from sklearn.model_selection import (
+        GroupKFold,
+        GroupShuffleSplit,
+        KFold,
+        StratifiedGroupKFold,
+        StratifiedKFold,
+        train_test_split,
+    )
 
     src = ctx.source
     info = _table(src, args.table)
     _column(src, args.table, args.target)
+    group = args.group_column
+    if group is not None:
+        _column(src, args.table, group)
+        if group == args.target:
+            raise ToolError("group_column must be different from the target.")
     candidates = args.features or [c["name"] for c in info.columns if c["name"] != args.target]
-    candidates = [c for c in candidates if c != args.target]
-    frame, sql, sampled = fetch(src, args.table, [args.target, *candidates], args.where, MAX_TRAIN_ROWS)
+    candidates = [c for c in candidates if c not in (args.target, group)]
+    columns = [args.target, *candidates] + ([group] if group else [])
+    frame, sql, sampled = fetch(src, args.table, columns, args.where, MAX_TRAIN_ROWS)
     y_all = to_numeric(frame[args.target])
-    keep = y_all.notna()
+    keep = y_all.notna() & (frame[group].notna() if group else True)
     frame, y_all = frame[keep].reset_index(drop=True), y_all[keep].reset_index(drop=True)
     binary = set(y_all.unique()) <= {0.0, 1.0} and y_all.nunique() == 2
     task = args.task if args.task != "auto" else ("classification" if binary else "regression")
@@ -299,22 +320,51 @@ def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
         raise ToolError("The rarer class has fewer than 30 examples; there is not enough signal to model.")
 
     spec, excluded = _screen(src, args.table, frame, y_all, candidates, classification)
+    if group:
+        excluded.append({"feature": group, "reason": "groups the validation splits"})
     if not spec:
         raise ToolError("No usable features remain after screening: " + json.dumps(excluded))
     X = encode(frame, spec)
     y = y_all.to_numpy()
     cat_idx = [i for i, f in enumerate(spec) if f["kind"] == "categorical"]
     names = [f["name"] for f in spec]
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=args.test_size, random_state=SEED, stratify=y if classification else None
-    )
+    if group:
+        g = frame[group].astype("string").to_numpy()
+        n_groups = len(set(g))
+        if n_groups < 10:
+            raise ToolError(f"Grouped validation needs at least 10 groups; {group} has {n_groups}.")
+        tr_idx, te_idx = next(
+            GroupShuffleSplit(1, test_size=args.test_size, random_state=SEED).split(X, y, g)
+        )
+        X_train, X_test, y_train, y_test, g_train = X[tr_idx], X[te_idx], y[tr_idx], y[te_idx], g[tr_idx]
+        if classification and len(set(y_test)) < 2:
+            raise ToolError(
+                "The held-out groups contain only one class; grouped validation cannot score them."
+            )
+        grouped_folds = (
+            StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=SEED)
+            if classification
+            else GroupKFold(n_splits=5)
+        )
+        splits = list(grouped_folds.split(X_train, y_train, g_train))
+    else:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=args.test_size, random_state=SEED, stratify=y if classification else None
+        )
+        folds = (StratifiedKFold if classification else KFold)(n_splits=5, shuffle=True, random_state=SEED)
+        splits = list(folds.split(X_train, y_train))
+        g_train = None
     params = {**GBM_PARAMS, "objective": "binary" if classification else "regression"}
 
-    def fit(Xf: np.ndarray, yf: np.ndarray) -> Any:
+    def fit(Xf: np.ndarray, yf: np.ndarray, gf: np.ndarray | None = None) -> Any:
         """Pick the number of rounds by early stopping on an inner validation split, then refit."""
-        X_fit, X_val, y_fit, y_val = train_test_split(
-            Xf, yf, test_size=0.2, random_state=SEED, stratify=yf if classification else None
-        )
+        if gf is None:
+            X_fit, X_val, y_fit, y_val = train_test_split(
+                Xf, yf, test_size=0.2, random_state=SEED, stratify=yf if classification else None
+            )
+        else:  # validate on unseen groups too, so early stopping does not reward memorizing groups
+            fi, vi = next(GroupShuffleSplit(1, test_size=0.2, random_state=SEED).split(Xf, yf, gf))
+            X_fit, X_val, y_fit, y_val = Xf[fi], Xf[vi], yf[fi], yf[vi]
         ds = lgb.Dataset(X_fit, y_fit, feature_name=names, categorical_feature=cat_idx, free_raw_data=False)
         val = lgb.Dataset(X_val, y_val, reference=ds)
         probe = lgb.train(
@@ -330,13 +380,15 @@ def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
 
     score = classification_metrics if classification else regression_metrics
     headline = "auc" if classification else "rmse"
-    folds = (StratifiedKFold if classification else KFold)(n_splits=5, shuffle=True, random_state=SEED)
     tree_cv, linear_cv = [], []
-    for tr, va in folds.split(X_train, y_train):
-        tree_cv.append(score(y_train[va], fit(X_train[tr], y_train[tr]).predict(X_train[va]))[headline])
+    for tr, va in splits:
+        fold_groups = g_train[tr] if g_train is not None else None
+        tree_cv.append(
+            score(y_train[va], fit(X_train[tr], y_train[tr], fold_groups).predict(X_train[va]))[headline]
+        )
         fold_linear = fit_linear(X_train[tr], y_train[tr], spec, classification)
         linear_cv.append(score(y_train[va], linear_predict(X_train[va], fold_linear))[headline])
-    booster = fit(X_train, y_train)
+    booster = fit(X_train, y_train, g_train)
     p_test = booster.predict(X_test)
     holdout = tree_holdout = score(y_test, p_test)
     train_metrics = score(y_train, booster.predict(X_train))
@@ -372,9 +424,23 @@ def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
         ]
 
     name = args.model_name or f"{args.target} {'classifier' if classification else 'regressor'}"
+    if group:
+        validation = {
+            "split": "grouped",
+            "group_column": group,
+            "groups": n_groups,
+            "test_groups": len(set(g[te_idx])),
+        }
+        measured = (
+            f"Performance is measured on {validation['test_groups']} of {n_groups} {group} groups held out "
+            "entirely, so it reflects groups the model has not seen; monitor it on new data."
+        )
+    else:
+        validation = {"split": "random"}
+        measured = "Performance is measured on a random holdout from the same period; monitor it on new data."
     limitations = [
         "Feature effects (SHAP) describe how the model uses each input, not causal effects.",
-        "Performance is measured on a random holdout from the same period; monitor it on new data.",
+        measured,
     ]
     if excluded:
         limitations.append(
@@ -402,6 +468,7 @@ def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
             "train_rows": len(y_train),
             "test_rows": len(y_test),
             "sampled": sampled,
+            "validation": validation,
         },
         "features": names,
         "excluded_features": excluded,
@@ -419,6 +486,7 @@ def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
             "algorithm": card["algorithm"],
             "n_train": len(y_train),
             "n_test": len(y_test),
+            "validation": validation,
             "features": [{"name": f["name"], "kind": f["kind"], "levels": len(f["levels"])} for f in spec],
             "excluded_features": excluded,
             "cv": {
