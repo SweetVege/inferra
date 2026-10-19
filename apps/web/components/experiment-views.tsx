@@ -166,12 +166,15 @@ export function PowerView({ d }: { d: Row }) {
 }
 
 export function BayesianView({ d }: { d: Row }) {
+  // For a rate, the expected loss is a difference of proportions: read it in percentage points.
+  const loss = num(d.expected_loss_treatment);
+  const lossText = d.metric_type === "binary" && Number.isFinite(loss) ? `${formatNumber(loss * 100, 2)} pp` : formatNumber(loss, 5);
   return (
     <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
       <Stat label="P(treatment better)" value={formatPercent(num(d.prob_treatment_better))} />
-      <Stat label="Expected loss if shipped" value={formatNumber(d.expected_loss_treatment, 5)} />
+      <Stat label="Expected loss if shipped" value={lossText} />
       <Stat label="Mean relative lift" value={formatPercent(num(d.relative_lift_mean))} />
-      <Stat label="95% credible interval" value={`${formatPercent(num(d.relative_lift_ci_low))} – ${formatPercent(num(d.relative_lift_ci_high))}`} hint={String(d.prior)} />
+      <Stat label="95% credible interval" value={`${formatPercent(num(d.relative_lift_ci_low))} to ${formatPercent(num(d.relative_lift_ci_high))}`} hint={String(d.prior)} />
     </dl>
   );
 }
