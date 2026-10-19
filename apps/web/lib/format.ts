@@ -10,7 +10,10 @@ export function formatNumber(value: unknown, maxDigits = 2): string {
 
 export function formatPercent(value: number | null | undefined, digits = 1): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  return `${(value * 100).toFixed(digits)}%`;
+  const pct = value * 100;
+  // Small shares keep two significant digits, so 0.084% is not shown as 0.1% (or 0.0%).
+  if (pct !== 0 && Math.abs(pct) < 1) return `${Number(pct.toPrecision(2))}%`;
+  return `${pct.toFixed(digits)}%`;
 }
 
 export function formatCompact(value: number): string {

@@ -12,7 +12,7 @@
 2. **Plan.** The Orchestrator maps the goal to a workflow template (explore, metric question, A/B analysis, data modeling, …), fills in its parameters, and asks a clarifying question only when it must. You approve the plan, or let the workspace auto-approve.
 3. **Run.** Specialist agents call typed tools against a sandboxed DuckDB: profiling and read-only SQL; A/B test design and analysis (power, SRM, CUPED, segments, Bayesian and sequential reads); regression, difference-in-differences, propensity matching, and forecasting; model training that compares gradient-boosted trees with a linear baseline, explains predictions with SHAP, and registers the winner for batch scoring; and dimensional modeling that finds a table's grain and entities, builds a tested star schema, and exports it as a dbt project. Every tool call is logged with its inputs, SQL, and output.
 4. **Verify.** The Insight Agent drafts findings that cite artifact values. A deterministic verifier checks that every number matches a cited value, blocks causal wording without a randomized or causal design, caps confidence on small samples, requires intervals with every estimate and forecast, requires observational causal claims to state their assumption, insists on held-out model metrics, refuses effect claims from tests that failed their sample ratio check, and makes failing data-model tests visible. Failed drafts go back for revision; drafts that still fail are flagged, not hidden.
-5. **Review.** You accept, edit, or reject each insight.
+5. **Review.** You accept, edit, or reject each insight. Edits keep the agent's original text and go through the verifier again.
 6. **Share and monitor.** Reviewed insights become a report with charts and a method appendix, published as a frozen version and shareable by a revocable link that needs no account. Any completed run can re-run daily or weekly on the plan you approved, and a monitor ("Alert me when conversion drops") raises an in-app alert when its metric check crosses the threshold.
 
 ```mermaid
@@ -25,6 +25,14 @@ flowchart LR
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/PRD.md](docs/PRD.md) for scope and roadmap.
+
+## On real data
+
+Public Kaggle datasets, run on the live deployment with a real model and reviewed by a person before publishing.
+
+| Case | Question | Result |
+|---|---|---|
+| [Cookie Cats](https://inferra-demo.vercel.app/r/pHet7uCTv6eOYl5ZHNrBFnm0bllHxzYJ) (mobile game A/B test, 90,189 players) | Should the first gate move from level 30 to level 40? | No: 7-day retention fell by 0.82 percentage points (p=0.0016), with no offsetting gain in 1-day retention or engagement. Matches the published analyses of this dataset. |
 
 ## Status
 
