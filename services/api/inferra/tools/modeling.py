@@ -186,9 +186,13 @@ def fit_regression(ctx: ToolContext, args: RegressionInput) -> ToolOutput:
     else:
         result.update(r_squared=float(fit.rsquared), adj_r_squared=float(fit.rsquared_adj))
     result = round_floats(result)
+    # Name the model and the filter: runs often fit a logistic and a linear model of the same target.
+    title = f"{'Logistic' if kind == 'logistic' else 'Linear'} regression: {args.target}"
+    if args.where:
+        title += f" where {args.where if len(args.where) <= 60 else args.where[:57] + '...'}"
     return ToolOutput(
         result=result,
-        artifact=ArtifactDraft("regression", f"Regression: {args.target}", result),
+        artifact=ArtifactDraft("regression", title, result),
         code=sql,
     )
 

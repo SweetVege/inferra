@@ -53,13 +53,17 @@ def test_linear_regression_matches_statsmodels(tmp_path: Path) -> None:
 
 
 def test_logistic_regression_reports_odds_ratios(tmp_path: Path) -> None:
-    data = run(
-        ctx_for(SAMPLES / "customer_churn.csv", tmp_path),
-        "fit_regression",
-        target="churned",
-        features=["logins_30d", "payment_failures_90d", "plan"],
-    ).artifact.data
+    ctx = ctx_for(SAMPLES / "customer_churn.csv", tmp_path)
+    features = ["logins_30d", "payment_failures_90d", "plan"]
+    artifact = run(ctx, "fit_regression", target="churned", features=features).artifact
+    data = artifact.data
     assert data["model"] == "logistic regression"
+    # A logistic and a linear probability model of the same target are told apart by title.
+    assert artifact.title == "Logistic regression: churned"
+    linear = run(
+        ctx, "fit_regression", target="churned", features=features, model="linear", where="logins_30d > 0"
+    ).artifact
+    assert linear.title == "Linear regression: churned where logins_30d > 0"
     failures = next(c for c in data["coefficients"] if c["term"] == "payment_failures_90d")
     assert failures["odds_ratio"] == pytest.approx(np.exp(failures["estimate"]), rel=1e-6)
     assert failures["odds_ratio_ci_low"] < failures["odds_ratio"] < failures["odds_ratio_ci_high"]
