@@ -1,5 +1,6 @@
 """Uploaded files, stored as Parquet and queried with an in-process, sandboxed DuckDB."""
 
+import codecs
 import datetime as dt
 import decimal
 import math
@@ -74,16 +75,54 @@ def convert_to_parquet(source: Path, dest: Path) -> tuple[int, list[dict[str, st
         elif ext == ".parquet":
             relation = f"read_parquet('{_sql_path(source)}')"
         else:
-            relation = f"read_csv_auto('{_sql_path(source)}', sample_size=-1)"
+            text = _as_utf8(source, dest.parent / f".{dest.stem}.utf8{ext}")
+            relation = f"read_csv_auto('{_sql_path(text)}', sample_size=-1)"
         con.execute(f"COPY (SELECT * FROM {relation}) TO '{_sql_path(dest)}' (FORMAT parquet)")
         described = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{_sql_path(dest)}')")
         columns = [{"name": r[0], "type": r[1]} for r in described.fetchall()]
         row_count = con.execute(f"SELECT count(*) FROM read_parquet('{_sql_path(dest)}')").fetchone()[0]  # type: ignore[index]
     except duckdb.Error as exc:
-        raise QueryError(f"Could not read the file: {exc}") from exc
+        # DuckDB's message repeats every sniffer setting; the first line says what went wrong.
+        raise QueryError(f"Could not read the file: {str(exc).splitlines()[0]}") from exc
     finally:
         con.close()
+        for leftover in dest.parent.glob(f".{dest.stem}.utf8*"):
+            leftover.unlink(missing_ok=True)
     return int(row_count), columns
+
+
+CHUNK = 1 << 20
+
+
+def _encoding(path: Path) -> str:
+    """'utf-8' when the whole file decodes as UTF-8, else Windows-1252 (what Excel and most Western
+    exports write), else Latin-1, which accepts any byte."""
+    for encoding in ("utf-8", "cp1252"):
+        decoder = codecs.getincrementaldecoder(encoding)()
+        try:
+            with open(path, "rb") as fh:
+                while chunk := fh.read(CHUNK):
+                    decoder.decode(chunk)
+                decoder.decode(b"", final=True)
+            return encoding
+        except UnicodeDecodeError:
+            continue
+    return "latin-1"
+
+
+def _as_utf8(source: Path, scratch: Path) -> Path:
+    """The file itself when it is UTF-8; otherwise a UTF-8 copy, so text such as '£' or 'é' from a
+    Windows export reads correctly instead of failing the upload."""
+    encoding = _encoding(source)
+    if encoding == "utf-8":
+        return source
+    with (
+        open(source, encoding=encoding, newline="") as src,
+        open(scratch, "w", encoding="utf-8", newline="") as out,
+    ):
+        while chunk := src.read(CHUNK):
+            out.write(chunk)
+    return scratch
 
 
 def _sql_path(path: Path) -> str:

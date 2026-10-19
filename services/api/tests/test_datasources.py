@@ -117,3 +117,24 @@ def test_create_in_sql_points_to_the_view_tool(orders_csv: Path) -> None:
         source.query("CREATE OR REPLACE TEMP VIEW v AS SELECT * FROM orders; SELECT count(*) FROM v")
     with pytest.raises(QueryError, match="create_view"):
         source.query("CREATE TABLE t AS SELECT 1 AS x")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("café,£2.50,€3\n".encode("cp1252"), ["café", "£2.50", "€3"]),  # an Excel export on Windows
+        (b"r\xe9sum\xe9,\x81x,1\n", ["résumé", "\x81x", "1"]),  # not even cp1252: read as Latin-1
+        ("naïve,£1,ok\n".encode(), ["naïve", "£1", "ok"]),  # UTF-8 passes through untouched
+    ],
+)
+def test_non_utf8_csv_uploads_are_read(tmp_path: Path, raw: bytes, expected: list[str]) -> None:
+    import duckdb
+
+    src = tmp_path / "data.csv"
+    src.write_bytes(b"a,b,c\n" + raw * 3)
+    dest = tmp_path / "out" / "data.parquet"
+    rows, columns = convert_to_parquet(src, dest)
+    assert rows == 3 and [c["name"] for c in columns] == ["a", "b", "c"]
+    first = duckdb.connect().execute(f"SELECT * FROM read_parquet('{dest}') LIMIT 1").fetchone()
+    assert [str(v) for v in first] == expected
+    assert [p.name for p in dest.parent.iterdir()] == ["data.parquet"]  # no UTF-8 scratch copy left
