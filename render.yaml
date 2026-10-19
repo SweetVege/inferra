@@ -37,3 +37,5 @@ services:
         value: "3"
       - key: INFERRA_RUN_ALLOWLIST
         sync: false
+      - key: INFERRA_RUN_UNLIMITED
+        sync: false
