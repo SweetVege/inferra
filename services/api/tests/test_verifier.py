@@ -452,3 +452,28 @@ def test_failing_data_model_tests_must_be_disclosed() -> None:
     clean = {"m": {**artifacts["m"], "data": {**artifacts["m"]["data"], "tests_failed": 0}}}
     v = verify_insight(draft("The fact has 6,573 rows.", evidence, confidence="high"), clean)
     assert v.verified and all(c.name != "model_tests" for c in v.checks)
+
+
+def test_a_range_shares_its_unit() -> None:
+    artifacts = {
+        "t": {
+            "kind": "experiment",
+            "data": {
+                "design": "randomized",
+                "comparisons": [{"diff": -0.0082, "diff_ci_low": -0.0133, "diff_ci_high": -0.0031}],
+            },
+        }
+    }
+    evidence = [
+        {"artifact_id": "t", "path": f"comparisons.0.{k}", "value": v}
+        for k, v in [("diff", -0.0082), ("diff_ci_low", -0.0133), ("diff_ci_high", -0.0031)]
+    ]
+    for claim in [
+        "The difference was -0.82 pp (95% CI -1.33 to -0.31 pp).",
+        "The difference was -0.82% (95% CI -1.33–-0.31%).",
+    ]:
+        v = verify_insight(draft(claim, evidence), artifacts)
+        assert check(v, "number_grounding").passed, (claim, v.failures())
+    # The unit is shared only across a range, not with an unrelated neighbor.
+    v = verify_insight(draft("Retention fell 1.33 points, -0.82 pp.", evidence), artifacts)
+    assert not check(v, "number_grounding").passed

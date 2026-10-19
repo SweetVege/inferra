@@ -426,15 +426,17 @@ export function KeysView({ d }: { d: KeysData }) {
         {formatNumber(d.row_count)} rows
         {d.duplicate_rows > 0 && <>, with {formatNumber(d.duplicate_rows)} exact duplicate rows</>}.
       </p>
-      <DataTable
-        columns={["entity", "distinct", "role", "attributes"]}
-        rows={d.entities.map((e) => ({
-          entity: e.column,
-          distinct: e.distinct,
-          role: e.role,
-          attributes: e.role === "transaction" ? [...e.attributes, ...e.references.map((r) => `→ ${r}`)].join(", ") : e.attributes.join(", ") || "—",
-        }))}
-      />
+      {d.entities.length > 0 && (
+        <DataTable
+          columns={["entity", "distinct", "role", "attributes"]}
+          rows={d.entities.map((e) => ({
+            entity: e.column,
+            distinct: e.distinct,
+            role: e.role,
+            attributes: e.role === "transaction" ? [...e.attributes, ...e.references.map((r) => `→ ${r}`)].join(", ") : e.attributes.join(", ") || "—",
+          }))}
+        />
+      )}
       {d.unstable_attributes.length > 0 && (
         <ul className="space-y-1">
           {d.unstable_attributes.map((u) => (
