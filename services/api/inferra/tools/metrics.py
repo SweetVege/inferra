@@ -456,16 +456,26 @@ def check_metric(ctx: ToolContext, args: CheckInput) -> ToolOutput:
     conds = [args.where] if args.where else []
     rows, sql = run_metric(ctx, m, grain=args.grain, conditions=conds, limit=2000)
     day = f"CAST({q(m.time_column)} AS DATE)"
-    last_day_sql = f"SELECT max({day})::VARCHAR AS last_day FROM {q(m.table)} {_conditions(m, *conds)}"
+    dates_sql = (
+        f"SELECT date_trunc('{args.grain}', {day})::DATE::VARCHAR AS period, count(DISTINCT {day}) AS days, "
+        f"max({day})::VARCHAR AS last_day FROM {q(m.table)} {_conditions(m, *conds)} GROUP BY 1 ORDER BY 1"
+    )
     try:
-        last_day = ctx.source.query(last_day_sql).rows[0]["last_day"]
+        dates = ctx.source.query(dates_sql, limit=5000).rows
     except QueryError as exc:
         raise ToolError(str(exc)) from exc
     rows = [r for r in rows if r["value"] is not None]
     excluded = None
-    if rows and last_day and _period_end(str(rows[-1]["period"]), args.grain) > str(last_day):
-        excluded = rows[-1]["period"]
-        rows = rows[:-1]
+    # A latest period that ends after the data does is partial only if it also has fewer dates than
+    # usual: data stamped once a week (weekly totals dated each Friday) is complete as it stands.
+    if rows and len(dates) > 1:
+        last, typical = dates[-1], float(np.median([int(d["days"]) for d in dates[:-1]]))
+        if (
+            _period_end(str(rows[-1]["period"]), args.grain) > str(last["last_day"])
+            and int(last["days"]) < typical
+        ):
+            excluded = rows[-1]["period"]
+            rows = rows[:-1]
     if len(rows) < args.baseline_periods + 1:
         raise ToolError(
             f"Need {args.baseline_periods + 1} complete {args.grain}s; found {len(rows)}. "

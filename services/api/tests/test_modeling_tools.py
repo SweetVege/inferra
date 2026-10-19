@@ -189,6 +189,20 @@ def test_forecast_drops_partial_last_period(tmp_path: Path) -> None:
         run(ctx_for(SAMPLES / "daily_sales.csv", tmp_path), "forecast", date_column="date", agg="sum")
 
 
+def test_forecast_keeps_the_last_week_of_data_stamped_once_a_week(tmp_path: Path) -> None:
+    # Weekly totals dated each Friday (like Walmart's): the last week is complete, though the
+    # Monday-to-Sunday bucket it falls in runs past the last date.
+    fridays = pd.date_range("2022-01-07", periods=60, freq="W-FRI")
+    rng = np.random.default_rng(4)
+    df = pd.DataFrame({"week": fridays.strftime("%Y-%m-%d"), "sales": 100 + rng.normal(0, 5, 60)})
+    data = run(
+        ctx_for(df, tmp_path), "forecast", date_column="week", value_column="sales", freq="week", horizon=4
+    ).artifact.data
+    assert data["dropped_partial_period"] is False
+    assert data["history_periods"] == 60
+    assert data["last_actual"] == pytest.approx(df.sales.iloc[-1], rel=1e-6)
+
+
 # --- machine learning -------------------------------------------------------------------------
 
 

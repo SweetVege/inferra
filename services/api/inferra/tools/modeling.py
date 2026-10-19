@@ -517,7 +517,8 @@ def forecast(ctx: ToolContext, args: ForecastInput) -> ToolOutput:
     )
     day = f"CAST({q(args.date_column)} AS DATE)"
     sql = (
-        f"SELECT date_trunc('{args.freq}', {day}) AS period, {measure} AS value FROM {q(args.table)} "
+        f"SELECT date_trunc('{args.freq}', {day}) AS period, {measure} AS value, "
+        f"count(DISTINCT {day}) AS days FROM {q(args.table)} "
         f"{_where(args.where, f'{q(args.date_column)} IS NOT NULL')} GROUP BY 1 ORDER BY 1"
     )
     try:
@@ -531,12 +532,17 @@ def forecast(ctx: ToolContext, args: ForecastInput) -> ToolOutput:
     ).asfreq(pandas_freq)
     filled = int(series.isna().sum())
     series = series.fillna(0.0 if args.agg in {"sum", "count"} else series.interpolate())
-    # The last period may be partial (data stops mid-week or mid-month): drop it from training.
+    # The last period may be partial (data stops mid-week or mid-month): drop it from training. It is
+    # partial only if it also has fewer dates than a typical period, so data stamped once per period
+    # (weekly sales dated each Friday, monthly snapshots) keeps its last, complete period.
     last_date = src.query(f"SELECT max({day})::VARCHAR AS d FROM {q(args.table)} {_where(args.where)}").rows[
         0
     ]["d"]
     period_end = series.index[-1] + pd.tseries.frequencies.to_offset(pandas_freq) - pd.Timedelta(days=1)
-    partial = args.freq != "day" and pd.Timestamp(last_date) < period_end
+    days = [int(r["days"]) for r in rows]
+    partial = (
+        args.freq != "day" and pd.Timestamp(last_date) < period_end and days[-1] < float(np.median(days[:-1]))
+    )
     if partial:
         series = series.iloc[:-1]
 
