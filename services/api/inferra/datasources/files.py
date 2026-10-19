@@ -59,6 +59,7 @@ def convert_to_parquet(source: Path, dest: Path) -> tuple[int, list[dict[str, st
     dest.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect()
     limit_duckdb(con)
+    con.execute("SET enable_progress_bar=false")
     try:
         if ext in {".xlsx", ".xls"}:
             import pandas as pd
@@ -77,7 +78,15 @@ def convert_to_parquet(source: Path, dest: Path) -> tuple[int, list[dict[str, st
         else:
             text = _as_utf8(source, dest.parent / f".{dest.stem}.utf8{ext}")
             relation = f"read_csv_auto('{_sql_path(text)}', sample_size=-1)"
-        con.execute(f"COPY (SELECT * FROM {relation}) TO '{_sql_path(dest)}' (FORMAT parquet)")
+        # Land the file as Parquet first: date detection then scans columns instead of re-parsing the CSV.
+        raw = dest.parent / f".{dest.stem}.raw.parquet"
+        con.execute(f"COPY (SELECT * FROM {relation}) TO '{_sql_path(raw)}' (FORMAT parquet)")
+        con.execute(f"CREATE VIEW raw_upload AS SELECT * FROM read_parquet('{_sql_path(raw)}')")
+        select = _with_parsed_dates(con, "raw_upload")
+        if select == "*":
+            raw.replace(dest)
+        else:
+            con.execute(f"COPY (SELECT {select} FROM raw_upload) TO '{_sql_path(dest)}' (FORMAT parquet)")
         described = con.execute(f"DESCRIBE SELECT * FROM read_parquet('{_sql_path(dest)}')")
         columns = [{"name": r[0], "type": r[1]} for r in described.fetchall()]
         row_count = con.execute(f"SELECT count(*) FROM read_parquet('{_sql_path(dest)}')").fetchone()[0]  # type: ignore[index]
@@ -86,12 +95,71 @@ def convert_to_parquet(source: Path, dest: Path) -> tuple[int, list[dict[str, st
         raise QueryError(f"Could not read the file: {str(exc).splitlines()[0]}") from exc
     finally:
         con.close()
-        for leftover in dest.parent.glob(f".{dest.stem}.utf8*"):
+        for leftover in [*dest.parent.glob(f".{dest.stem}.utf8*"), dest.parent / f".{dest.stem}.raw.parquet"]:
             leftover.unlink(missing_ok=True)
     return int(row_count), columns
 
 
 CHUNK = 1 << 20
+
+# Date formats DuckDB's CSV sniffer misses, such as Excel's US export "12/1/2010 8:26" (no zero padding).
+# Month-first and day-first readings are told apart only when the data rules one out.
+MONTH_FIRST = ("%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y", "%m-%d-%Y")
+DAY_FIRST = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y %H:%M", "%d.%m.%Y")
+YEAR_FIRST = ("%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M", "%Y/%m/%d")
+DATE_LIKE = r"^\s*\d{1,4}[/.\-]\d{1,2}[/.\-]\d{1,4}(\s+\d{1,2}:\d{2}(:\d{2})?)?\s*$"
+DATE_SAMPLE = 1000
+
+
+def _with_parsed_dates(con: duckdb.DuckDBPyConnection, view: str) -> str:
+    """A select list that turns text columns holding dates into DATE or TIMESTAMP. A column is
+    converted only when every value parses with one format to a year from 1900 to 2100, and left as
+    text when both a month-first and a day-first reading fit (every day 12 or less)."""
+    q = '"' + view + '"'
+    columns = con.execute(f"DESCRIBE SELECT * FROM {q}").fetchall()
+    text = [c[0] for c in columns if c[1] == "VARCHAR"]
+    candidates = []
+    for name in text:
+        col = '"' + name.replace('"', '""') + '"'
+        sample = con.execute(
+            f"SELECT count(*), count(*) FILTER (WHERE regexp_matches({col}, '{DATE_LIKE}')) "
+            f"FROM (SELECT {col} FROM {q} WHERE {col} IS NOT NULL LIMIT {DATE_SAMPLE})"
+        ).fetchone()
+        if sample and sample[0] and sample[0] == sample[1]:
+            candidates.append(col)
+    replace = []
+    for col in candidates:
+        formats = _fitting(con, f"(SELECT {col} FROM {q} WHERE {col} IS NOT NULL LIMIT {DATE_SAMPLE})", col)
+        if not formats:
+            continue
+        counts = con.execute(
+            f"SELECT count({col}), "
+            + ", ".join(
+                f"count(*) FILTER (WHERE year(try_strptime(trim({col}), '{f}')) BETWEEN 1900 AND 2100)"
+                for f in formats
+            )
+            + f" FROM {q}"
+        ).fetchone()
+        assert counts is not None
+        fits = [f for f, n in zip(formats, counts[1:], strict=True) if n == counts[0]]
+        if not fits or (set(fits) & set(MONTH_FIRST) and set(fits) & set(DAY_FIRST)):
+            continue  # not a date, or ambiguous: leave the text for a person to read
+        fmt = fits[0]
+        parsed = f"try_strptime(trim({col}), '{fmt}')"
+        replace.append(f"{parsed if '%H' in fmt else parsed + '::DATE'} AS {col}")
+    return f"* REPLACE ({', '.join(replace)})" if replace else "*"
+
+
+def _fitting(con: duckdb.DuckDBPyConnection, rows: str, col: str) -> tuple[str, ...]:
+    """The formats that parse every value of a sample, so the full scan tries only those."""
+    formats = MONTH_FIRST + DAY_FIRST + YEAR_FIRST
+    counts = con.execute(
+        f"SELECT count({col}), "
+        + ", ".join(f"count(try_strptime(trim({col}), '{f}'))" for f in formats)
+        + f" FROM {rows}"
+    ).fetchone()
+    assert counts is not None
+    return tuple(f for f, n in zip(formats, counts[1:], strict=True) if n == counts[0])
 
 
 def _encoding(path: Path) -> str:
