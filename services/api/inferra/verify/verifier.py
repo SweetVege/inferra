@@ -10,7 +10,7 @@ from typing import Any
 
 NUMBER = re.compile(
     r"(?<![\w.])(?P<sign>[-−])?(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
-    r"(?P<suffix>\s?%|\s?pp\b|[kKMB]\b|x\b|×)?"
+    r"(?P<suffix>\s?%|\s?pp\b|\s(?:percentage points?|percent)\b|[kKMB]\b|x\b|×)?"
 )
 RANGE_GAP = re.compile(r"\s*(?:to|and|–|—|-)\s*")
 CAUSAL = re.compile(
@@ -78,6 +78,11 @@ def _matches_display(value: float, shown: float, decimals: int) -> bool:
     return abs(value - shown) <= tolerance
 
 
+def _suffix(m: re.Match[str]) -> str:
+    suffix = (m.group("suffix") or "").strip()
+    return {"percent": "%"}.get(suffix, "pp" if suffix.startswith("percentage") else suffix)
+
+
 def _number_tokens(text: str) -> list[tuple[str, float, int, str]]:
     matches = list(NUMBER.finditer(text))
     tokens = []
@@ -87,11 +92,11 @@ def _number_tokens(text: str) -> list[tuple[str, float, int, str]]:
         if m.group("sign"):
             value = -value
         decimals = len(raw.split(".")[1]) if "." in raw else 0
-        suffix = (m.group("suffix") or "").strip()
+        suffix = _suffix(m)
         nxt = matches[i + 1] if i + 1 < len(matches) else None
         # A range shares its unit: "-1.33 to -0.31 pp", "2.1–3.4%".
         if not suffix and nxt is not None and RANGE_GAP.fullmatch(text[m.end() : nxt.start()]):
-            shared = (nxt.group("suffix") or "").strip()
+            shared = _suffix(nxt)
             suffix = shared if shared in {"%", "pp"} else ""
         tokens.append((m.group(0).strip(), value, decimals, suffix))
     return tokens
