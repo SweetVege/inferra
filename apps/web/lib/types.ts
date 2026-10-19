@@ -224,6 +224,8 @@ export interface Insight {
   verified: boolean;
   status: InsightStatus;
   original_claim: string | null;
+  original_title: string | null;
+  original_action: string | null;
   review_note: string | null;
   reviewed_at: string | null;
 }
@@ -487,6 +489,8 @@ export interface ReportInsight {
   claim: string;
   edited: boolean;
   original_claim: string | null;
+  original_title: string | null;
+  original_action: string | null;
   evidence: Evidence[];
   method: string;
   caveats: string[];

@@ -141,13 +141,18 @@ class InsightOut(ORM):
     verified: bool
     status: str
     original_claim: str | None
+    original_title: str | None
+    original_action: str | None
     review_note: str | None
     reviewed_at: datetime | None
 
 
 class InsightReview(BaseModel):
     status: Literal["accepted", "edited", "rejected", "draft"]
+    # With status "edited": the fields the reviewer rewrote (omitted ones stay as they are).
+    title: str | None = Field(default=None, max_length=300)
     claim: str | None = Field(default=None, max_length=4000)
+    recommended_action: str | None = Field(default=None, max_length=2000)
     note: str | None = Field(default=None, max_length=2000)
 
 

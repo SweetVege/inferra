@@ -80,6 +80,31 @@ def test_explore_run_end_to_end(client: TestClient, orders_csv: Path) -> None:
     assert client.patch(f"{url}/{first['id']}", json={"status": "accepted"}).json()["status"] == "accepted"
     edited = client.patch(f"{url}/{second['id']}", json={"status": "edited", "claim": "Reworded."}).json()
     assert edited["claim"] == "Reworded." and edited["original_claim"] == second["claim"]
+    assert edited["verified"] and edited["original_title"] is None
+
+    # Title and next step are editable too; the originals are kept and the verifier runs again.
+    edited = client.patch(
+        f"{url}/{second['id']}",
+        json={"status": "edited", "title": "A better title", "recommended_action": ""},
+    ).json()
+    assert edited["title"] == "A better title" and edited["original_title"] == second["title"]
+    assert edited["recommended_action"] is None
+    assert edited["original_action"] == (second["recommended_action"] or "")
+    assert edited["claim"] == "Reworded." and edited["original_claim"] == second["claim"]
+
+    # An edit that cites a number no artifact supports would break a verified insight: refused.
+    res = client.patch(
+        f"{url}/{first['id']}", json={"status": "edited", "claim": "Orders grew 987.6% last year."}
+    )
+    assert res.status_code == 422 and "987.6%" in res.json()["detail"]
+    after = next(
+        i
+        for i in client.get(f"/api/workspaces/{ws}/runs/{run['id']}").json()["insights"]
+        if i["id"] == first["id"]
+    )
+    assert after["claim"] == first["claim"] and after["status"] == "accepted"
+    res = client.patch(f"{url}/{first['id']}", json={"status": "edited", "title": " "})
+    assert res.status_code == 400
     assert client.patch(f"{url}/{third['id']}", json={"status": "rejected"}).json()["status"] == "rejected"
 
     runs = client.get(f"/api/workspaces/{ws}/runs").json()

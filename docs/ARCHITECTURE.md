@@ -186,6 +186,8 @@ The verifier checks that numbers are grounded and that the wording matches the s
 
 Failures go back to the Insight Agent with reasons (at most 2 revisions). Insights that still fail are shown to the reviewer flagged as **Unverified**, never silently dropped.
 
+A reviewer can edit an insight's title, claim, and next step. The agent's original text is kept and shown, and the verifier runs again on the edit: an edit that would break a verified insight (for example, a number no cited value supports) is refused, so "Verified" keeps meaning every number traces back to a tool's output.
+
 Only **accepted or edited** insights can be published into a report. This is checked when an insight is added and again on every publish, since a reviewer can reject an insight in between.
 
 ### Reports

@@ -15,6 +15,16 @@ const STATUS: Record<InsightStatus, { label: string; tone: "neutral" | "good" | 
   rejected: { label: "Rejected", tone: "bad" },
 };
 
+interface Draft {
+  title: string;
+  claim: string;
+  recommended_action: string;
+}
+
+const draftOf = (i: Insight): Draft => ({ title: i.title, claim: i.claim, recommended_action: i.recommended_action ?? "" });
+
+const field = "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-accent";
+
 export function InsightCard({
   insight,
   workspaceId,
@@ -32,15 +42,15 @@ export function InsightCard({
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(insight.claim);
+  const [draft, setDraft] = useState<Draft>(draftOf(insight));
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function review(status: InsightStatus, claim?: string) {
+  async function review(status: InsightStatus, edit?: Draft) {
     setBusy(status);
     setError(null);
     try {
-      const next = await api.patch<Insight>(`/workspaces/${workspaceId}/insights/${insight.id}`, { status, claim });
+      const next = await api.patch<Insight>(`/workspaces/${workspaceId}/insights/${insight.id}`, { status, ...edit });
       onChange(next);
       setEditing(false);
     } catch (err) {
@@ -68,34 +78,64 @@ export function InsightCard({
         <Badge>{titleCase(insight.confidence)} confidence</Badge>
         <Badge tone={status.tone}>{status.label}</Badge>
       </div>
-      <h3 className="mt-3 text-base font-semibold">{insight.title}</h3>
       {editing ? (
-        <div className="mt-2 space-y-2">
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            rows={3}
-            className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
-            aria-label="Edited claim"
-          />
+        <div className="mt-3 space-y-3">
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-ink-3">Title</span>
+            <input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} maxLength={300} className={cx(field, "h-9 font-semibold")} />
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-ink-3">Claim</span>
+            <textarea value={draft.claim} onChange={(e) => setDraft({ ...draft, claim: e.target.value })} rows={4} className={field} />
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-ink-3">Next step</span>
+            <textarea
+              value={draft.recommended_action}
+              onChange={(e) => setDraft({ ...draft, recommended_action: e.target.value })}
+              rows={2}
+              placeholder="Leave empty to remove the next step."
+              className={field}
+            />
+          </label>
+          <p className="text-xs text-ink-3">The verifier checks your edit: every number must still match the cited evidence.</p>
           <div className="flex gap-2">
             <Button size="sm" variant="primary" loading={busy === "edited"} onClick={() => void review("edited", draft)}>
               Save edit
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setEditing(false);
+                setError(null);
+              }}
+            >
               Cancel
             </Button>
           </div>
         </div>
       ) : (
-        <p className="mt-1 text-[15px] leading-relaxed">{insight.claim}</p>
-      )}
-      {insight.original_claim && !editing && <p className="mt-1 text-xs text-ink-3">Original: {insight.original_claim}</p>}
-      {insight.recommended_action && (
-        <p className="mt-3 text-sm">
-          <span className="font-medium">Next step: </span>
-          <span className="text-ink-2">{insight.recommended_action}</span>
-        </p>
+        <>
+          <h3 className="mt-3 text-base font-semibold">{insight.title}</h3>
+          <p className="mt-1 text-[15px] leading-relaxed">{insight.claim}</p>
+          {insight.recommended_action && (
+            <p className="mt-3 text-sm">
+              <span className="font-medium">Next step: </span>
+              <span className="text-ink-2">{insight.recommended_action}</span>
+            </p>
+          )}
+          {(insight.original_title != null || insight.original_claim != null || insight.original_action != null) && (
+            <details className="mt-2 text-xs text-ink-3">
+              <summary className="cursor-pointer">Edited by a reviewer. Show what the agent wrote</summary>
+              <div className="mt-1 space-y-1 border-l-2 border-line pl-3">
+                {insight.original_title != null && <p>Title: {insight.original_title}</p>}
+                {insight.original_claim != null && <p>Claim: {insight.original_claim}</p>}
+                {insight.original_action != null && <p>Next step: {insight.original_action || "(none)"}</p>}
+              </div>
+            </details>
+          )}
+        </>
       )}
 
       <button onClick={() => setOpen(!open)} className="mt-4 inline-flex items-center gap-1 text-sm text-accent hover:underline" aria-expanded={open}>
@@ -153,7 +193,7 @@ export function InsightCard({
           <Button size="sm" variant={insight.status === "accepted" ? "primary" : "secondary"} loading={busy === "accepted"} onClick={() => void review("accepted")}>
             <Check className="size-4" aria-hidden /> Accept
           </Button>
-          <Button size="sm" onClick={() => { setDraft(insight.claim); setEditing(true); }}>
+          <Button size="sm" onClick={() => { setDraft(draftOf(insight)); setEditing(true); }}>
             <Pencil className="size-4" aria-hidden /> Edit
           </Button>
           <Button size="sm" variant="danger" loading={busy === "rejected"} onClick={() => void review("rejected")}>
