@@ -141,7 +141,7 @@ StepResult = { status: ok | failed | needs_input,
                tool_calls[] }        // ids into the tool-call log
 ```
 
-Guardrails per step: at most N tool calls (default 8; each tool result tells the specialist how many are left, and before finishing it must run any check it would otherwise hand off as a caveat, if its tools and remaining calls allow) and a time limit (`INFERRA_STEP_TIME_LIMIT_MINUTES`, default 8); a model request that sends nothing for `INFERRA_LLM_TIMEOUT_SECONDS` (default 120) fails and is retried once. A step that hits a limit stops with a reason that names what it was doing, and the run page shows the tool a running step is in, or that it is waiting for the model, with the time elapsed. On failure the Orchestrator either re-plans the remaining steps once or stops and reports what failed.
+Guardrails per step: at most N tool calls (default 8; each tool result tells the specialist how many are left, and before finishing it must run any check it would otherwise hand off as a caveat, and measure any explanation it states as fact, if its tools and remaining calls allow) and a time limit (`INFERRA_STEP_TIME_LIMIT_MINUTES`, default 8); a model request that sends nothing for `INFERRA_LLM_TIMEOUT_SECONDS` (default 120) fails and is retried once. A step that hits a limit stops with a reason that names what it was doing, and the run page shows the tool a running step is in, or that it is waiting for the model, with the time elapsed. On failure the Orchestrator either re-plans the remaining steps once or stops and reports what failed.
 
 ## 5. Tool layer
 
@@ -178,7 +178,7 @@ The **Verifier** is deterministic code that runs on every draft:
 7. **Sample ratio.** An experiment that failed its SRM check can only appear as a low-confidence insight that discloses the broken assignment.
 8. **Labels.** Numbers inside category labels of cited results (a version "5.2", a date) may be repeated without a citation; free text such as SQL is excluded.
 9. **Assumptions.** Causal wording from an observational method (difference-in-differences, matching) needs a passing method check (parallel pre-trends, covariate balance) and a caveat naming the identifying assumption.
-10. **Held-out metrics.** Model performance must be cited from holdout or cross-validation results, never training metrics; forecasts must be cited with their prediction interval.
+10. **Held-out metrics.** Model performance must be cited from holdout or cross-validation results, never training metrics; a model that is not meaningfully better than the naive predictor on the holdout says so first on its card; forecasts must be cited with their prediction interval.
 11. **Model tests.** An insight citing a data model whose build has failing tests must say so in a caveat and cannot be high confidence.
 12. **Alert status.** An insight citing a metric check must also cite the check's `status` (`alert` or `ok`), so a monitoring headline always rests on the tool's decision, not on prose.
 

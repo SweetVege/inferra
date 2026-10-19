@@ -413,6 +413,8 @@ def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
         p_test, holdout = p_linear, linear_metrics
         train_metrics = score(y_train, linear_predict(X_train, linear))
     selected = "gradient-boosted trees" if tree_wins else baseline["model"]
+    # A sliver of improvement is noise: ask for AUC above 0.52 or an RMSE at least 1% below the mean's.
+    beats_naive = holdout["auc"] > 0.52 if classification else holdout["rmse"] < 0.99 * naive["rmse"]
     cv_scores = tree_cv if tree_wins else linear_cv
     drivers = _drivers(booster, X_test, spec) if tree_wins else _linear_drivers(linear, X_test, spec)
     calibration = []
@@ -442,6 +444,13 @@ def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
         "Feature effects (SHAP) describe how the model uses each input, not causal effects.",
         measured,
     ]
+    if not beats_naive:
+        limitations.insert(
+            0,
+            "The selected model is not meaningfully better on the holdout than "
+            + ("random ranking (AUC 0.5)" if classification else "predicting the training mean")
+            + "; do not use it for decisions.",
+        )
     if excluded:
         limitations.append(
             "Excluded inputs: " + "; ".join(f"{e['feature']} ({e['reason']})" for e in excluded)
@@ -498,6 +507,7 @@ def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
             "holdout": holdout,
             "baseline": baseline,
             "naive": naive,
+            "beats_naive": beats_naive,
             "train_metrics": {headline: train_metrics[headline]},
             "selected_model": selected,
             "tree_model_cv_mean": float(np.mean(tree_cv)),
