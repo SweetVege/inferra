@@ -23,6 +23,23 @@ Deploy in this order: each step needs a URL or key from the one before.
 2. **R2 → Manage API tokens → Create API token**: permission *Object Read & Write*, limited to that bucket.
 3. Note the **Access Key ID**, the **Secret Access Key**, and the S3 endpoint
    `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
+4. **Bucket → Settings → CORS policy**, so browsers can upload straight to the bucket (large files
+   then never pass through the web proxy). Use your web origin; add preview origins if you test
+   uploads on preview deployments:
+
+   ```json
+   [
+     {
+       "AllowedOrigins": ["https://inferra-demo.vercel.app"],
+       "AllowedMethods": ["PUT"],
+       "AllowedHeaders": ["*"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+
+   Without it, uploads still work through the API, but large files may hit the proxy's request
+   size limit.
 
 ## 3. API on Render
 
@@ -39,6 +56,7 @@ Deploy in this order: each step needs a URL or key from the one before.
    | `INFERRA_LLM_MODEL` / `ANTHROPIC_API_KEY` | a Claude model id and an API key, or leave empty (see below) |
    | `INFERRA_DAILY_RUN_LIMIT` | agent runs per person per UTC day, e.g. `3` (`0` or unset: no limit) |
    | `INFERRA_RUN_ALLOWLIST` | optional: comma-separated GitHub logins allowed to start runs (empty: everyone signed in) |
+   | `INFERRA_MAX_UPLOAD_MB` | optional: largest upload in MB (default `50`; keep the instance's memory in mind) |
    | `INFERRA_SAMPLE_DATA_ON_SIGNUP` | optional: `false` to start new workspaces empty (default `true`: they get the seven sample datasets) |
    | `INFERRA_GITHUB_CLIENT_ID` / `INFERRA_GITHUB_CLIENT_SECRET` | leave empty until step 6 |
 

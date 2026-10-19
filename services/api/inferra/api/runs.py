@@ -168,6 +168,45 @@ def approve(
     return run_detail(db, run)
 
 
+@router.post("/runs/{run_id}/retry", response_model=RunDetail, status_code=201)
+def retry(
+    run_id: str, access: WorkspaceAccess = Depends(workspace_access), db: Session = Depends(get_db)
+) -> RunDetail:
+    """Start a new run for a failed one. A run only fails after planning once its plan was
+    approved, so the plan is reused as is; a run that failed while planning plans again."""
+    from inferra.runtime.executor import add_steps
+
+    access.require("editor")
+    old = _run(db, access, run_id)
+    if old.status != "failed":
+        raise HTTPException(409, "Only a failed run can be retried.")
+    if not llm_available():
+        raise HTTPException(503, "Agent runs need a configured model.")
+    require_run_quota(db, access.user)
+    run = Run(
+        workspace_id=access.workspace.id,
+        created_by=access.user.id,
+        goal=old.goal,
+        dataset_ids=list(old.dataset_ids),
+        clarifications=list(old.clarifications),
+        status="running" if old.plan else "planning",
+        intent=old.intent,
+        plan=old.plan,
+    )
+    db.add(run)
+    db.flush()
+    rec = Recorder(db, run)
+    rec.event("created", "Retry of an earlier run", retry_of=old.id)
+    if old.plan:
+        add_steps(db, run, old.plan)
+        rec.event("approved", "Runs the plan approved for the earlier run")
+        enqueue(db, "execute_run", run_id=run.id)
+    else:
+        enqueue(db, "plan_run", run_id=run.id)
+    db.commit()
+    return run_detail(db, run)
+
+
 @router.post("/runs/{run_id}/cancel", response_model=RunDetail)
 def cancel(
     run_id: str, access: WorkspaceAccess = Depends(workspace_access), db: Session = Depends(get_db)

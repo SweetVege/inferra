@@ -1,8 +1,8 @@
 "use client";
 
-import { ArrowLeft, BellRing, CalendarClock, Check, ChevronRight, CircleDashed, Clock, Loader2, MessageCircleQuestion, MinusCircle, X, XCircle } from "lucide-react";
+import { ArrowLeft, BellRing, CalendarClock, Check, ChevronRight, CircleDashed, Clock, Loader2, MessageCircleQuestion, MinusCircle, RotateCw, X, XCircle } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { ArtifactView } from "@/components/artifact-view";
@@ -302,6 +302,8 @@ export default function RunPage() {
   const [error, setError] = useState<string | null>(null);
   const [shown, setShown] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const router = useRouter();
 
   const load = useCallback(async () => {
     try {
@@ -386,6 +388,26 @@ export default function RunPage() {
         <Card className="p-5 text-sm">
           <p className="font-medium">{run.status === "unsupported" ? "Not available yet" : "The run stopped"}</p>
           <p className="mt-1 text-ink-2">{run.error}</p>
+          {run.status === "failed" && editable && (
+            <Button
+              className="mt-3"
+              size="sm"
+              loading={retrying}
+              onClick={async () => {
+                setRetrying(true);
+                setError(null);
+                try {
+                  const next = await api.post<RunDetail>(`/workspaces/${ws}/runs/${id}/retry`);
+                  router.push(`/w/${ws}/runs/${next.id}`);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Could not retry the run.");
+                  setRetrying(false);
+                }
+              }}
+            >
+              <RotateCw className="size-4" aria-hidden /> Retry{run.plan ? " with the same plan" : ""}
+            </Button>
+          )}
         </Card>
       )}
 

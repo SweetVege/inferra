@@ -88,10 +88,12 @@ def drain(max_jobs: int = 100) -> int:
 
 
 def tick_schedules() -> int:
-    """Enqueue due scheduled re-runs."""
+    """Housekeeping on every tick: fail runs a restart interrupted, then enqueue due re-runs."""
+    from inferra.runtime.recovery import recover_stalled
     from inferra.runtime.scheduler import fire_due
 
     with session_scope() as db:
+        recover_stalled(db)
         return len(fire_due(db))
 
 

@@ -10,6 +10,7 @@ import { SampleDataButton } from "@/components/sample-data";
 import { canEdit, useWorkspace } from "@/components/session";
 import { Badge, Button, Card, cx, EmptyState, ErrorBanner, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
+import { uploadDataset } from "@/lib/upload";
 import { formatNumber, timeAgo } from "@/lib/format";
 import type { Dataset } from "@/lib/types";
 
@@ -21,6 +22,7 @@ export default function DatasetsPage() {
   const input = useRef<HTMLInputElement>(null);
   const [datasets, setDatasets] = useState<Dataset[] | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,16 +33,16 @@ export default function DatasetsPage() {
 
   async function upload(file: File) {
     setUploading(true);
+    setProgress(null);
     setError(null);
-    const form = new FormData();
-    form.append("file", file);
     try {
-      await api.post(`/workspaces/${ws}/datasets`, form);
+      await uploadDataset(ws, file, setProgress);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setUploading(false);
+      setProgress(null);
     }
   }
 
@@ -94,7 +96,11 @@ export default function DatasetsPage() {
             dragging ? "border-accent bg-accent-soft" : "border-line",
           )}
         >
-          {uploading ? <Spinner label="Uploading and converting to Parquet…" /> : "Drop a CSV, TSV, Parquet, or Excel file here (up to 50 MB)."}
+          {uploading ? (
+            <Spinner label={progress != null && progress < 1 ? `Uploading… ${Math.round(progress * 100)}%` : "Converting to Parquet and profiling…"} />
+          ) : (
+            "Drop a CSV, TSV, Parquet, or Excel file here."
+          )}
         </div>
       )}
       {editable && <ConnectionsPanel ws={ws} onImported={(d) => router.push(`/w/${ws}/datasets/${d.id}`)} />}

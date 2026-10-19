@@ -11,19 +11,41 @@ from inferra.tools.profiling import _table, column_kind, column_stats
 
 
 class ListTablesInput(BaseModel):
-    pass
+    table: str | None = Field(default=None, description="Only this table.")
+    search: str | None = Field(
+        default=None, description="Only columns whose name contains this text (case-insensitive)."
+    )
+
+
+MAX_LISTED_COLUMNS = 150
 
 
 @tool(
     "list_tables",
-    "List the tables available in this run with their columns, types, and row counts.",
+    "List the tables available in this run with their columns, types, and row counts. On wide tables, "
+    "pass a table and a search word to find specific columns.",
     ListTablesInput,
 )
-def list_tables(ctx: ToolContext, _args: ListTablesInput) -> ToolOutput:
-    tables = [
-        {"name": t.name, "row_count": t.row_count, "description": t.description, "columns": t.columns}
-        for t in ctx.source.list_tables()
-    ]
+def list_tables(ctx: ToolContext, args: ListTablesInput) -> ToolOutput:
+    tables = []
+    for t in ctx.source.list_tables():
+        if args.table and t.name != args.table:
+            continue
+        columns = t.columns
+        if args.search:
+            columns = [c for c in columns if args.search.lower() in c["name"].lower()]
+        entry: dict[str, object] = {
+            "name": t.name,
+            "row_count": t.row_count,
+            "description": t.description,
+            "column_count": len(t.columns),
+            "columns": columns[:MAX_LISTED_COLUMNS],
+        }
+        if len(columns) > MAX_LISTED_COLUMNS:
+            entry["note"] = f"{len(columns) - MAX_LISTED_COLUMNS} more columns; narrow with search."
+        tables.append(entry)
+    if args.table and not tables:
+        raise ToolError(f"Unknown table '{args.table}'.")
     return ToolOutput(result={"tables": tables})
 
 

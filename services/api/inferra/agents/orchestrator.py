@@ -1,6 +1,7 @@
 """The Orchestrator: natural-language goal -> intent + parameters -> plan from a workflow template."""
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -54,18 +55,46 @@ class PlanDecision:
     message: str | None = None
 
 
-def dataset_catalog(datasets: list[Dataset]) -> list[dict[str, Any]]:
-    return [
-        {
+MAX_CATALOG_COLUMNS = 40
+
+
+def _words(text: str) -> set[str]:
+    return {w for w in re.split(r"[^a-z0-9]+", text.lower()) if len(w) > 2}
+
+
+def pick_columns(
+    columns: list[dict[str, str]], goal: str, limit: int = MAX_CATALOG_COLUMNS
+) -> list[dict[str, str]]:
+    """At most `limit` columns for a prompt: those whose names share a word with the goal first,
+    then the rest in table order. Wide tables (hundreds of columns are common in public data)
+    would otherwise crowd the prompt and dilute the plan."""
+    if len(columns) <= limit:
+        return columns
+    words = _words(goal)
+    relevant = [c for c in columns if _words(c["name"]) & words]
+    keep = {c["name"] for c in (relevant + [c for c in columns if c not in relevant])[:limit]}
+    return [c for c in columns if c["name"] in keep]
+
+
+def dataset_catalog(datasets: list[Dataset], goal: str = "") -> list[dict[str, Any]]:
+    catalog = []
+    for d in datasets:
+        shown = pick_columns(d.columns, goal)
+        entry: dict[str, Any] = {
             "id": d.id,
             "table": d.table_name,
             "name": d.display_name,
             "rows": d.row_count,
             "description": d.description,
-            "columns": [f"{c['name']} ({c['type']})" for c in d.columns],
+            "columns": [f"{c['name']} ({c['type']})" for c in shown],
         }
-        for d in datasets
-    ]
+        if len(shown) < len(d.columns):
+            entry["more_columns"] = (
+                f"{len(d.columns) - len(shown)} more columns not shown; "
+                "list_tables with this table and a search word finds them."
+            )
+        catalog.append(entry)
+    return catalog
 
 
 def plan_goal(
@@ -77,7 +106,7 @@ def plan_goal(
     rec: Recorder,
     metrics: list[dict[str, Any]] | None = None,
 ) -> PlanDecision:
-    catalog = dataset_catalog(datasets)
+    catalog = dataset_catalog(datasets, goal)
     valid_ids = {d.id for d in datasets}
     lines = [
         f"Goal: {goal}",

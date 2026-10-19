@@ -45,6 +45,22 @@ class DatasetOut(ORM):
     synced_at: datetime | None = None
 
 
+class UploadStart(BaseModel):
+    filename: str = Field(min_length=1, max_length=300)
+    size: int = Field(ge=0)
+
+
+class UploadTicket(BaseModel):
+    # "direct": PUT the file to `url`, then call complete; "form": use the multipart upload endpoint.
+    mode: Literal["direct", "form"]
+    upload_id: str | None = None
+    url: str | None = None
+
+
+class UploadComplete(BaseModel):
+    filename: str = Field(min_length=1, max_length=300)
+
+
 class DatasetDetail(DatasetOut):
     preview: list[dict[str, Any]]
     profile: dict[str, Any] | None
