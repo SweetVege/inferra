@@ -257,6 +257,17 @@ def test_regression_models(tmp_path: Path) -> None:
     assert data["task"] == "regression"
     assert data["holdout"]["rmse"] < data["naive"]["rmse"]
     assert data["cv"]["metric"] == "rmse"
+    assert data["beats_naive"] is True
+    assert not any("do not use it" in line for line in data["card"]["limitations"])
+
+
+def test_a_model_no_better_than_the_mean_is_flagged(tmp_path: Path) -> None:
+    rng = np.random.default_rng(8)
+    n = 1000
+    df = pd.DataFrame({"a": rng.normal(size=n), "b": rng.normal(size=n), "y": rng.normal(size=n)})
+    data = run(ctx_for(df, tmp_path), "train_model", target="y").artifact.data
+    assert data["beats_naive"] is False
+    assert data["card"]["limitations"][0].startswith("The selected model is not meaningfully better")
 
 
 def test_lightgbm_threads_follow_the_container_cpu_quota(tmp_path: Path) -> None:

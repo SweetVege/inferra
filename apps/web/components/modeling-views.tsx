@@ -190,6 +190,11 @@ export function ModelView({ d }: { d: Row }) {
             {formatNumber((d.validation as Row).groups)} groups unseen in training
           </Badge>
         )}
+        {d.beats_naive === false && (
+          <Badge tone="bad" icon={AlertTriangle}>
+            Not meaningfully better than {classification ? "random ranking" : "predicting the mean"} on the holdout
+          </Badge>
+        )}
         {typeof d.model_id === "string" && (
           <Link href={`/w/${ws}/models/${d.model_id}`} className="text-xs text-accent hover:underline">
             Open in model registry →

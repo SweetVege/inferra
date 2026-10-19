@@ -10,6 +10,8 @@ Working rules:
   can run with your own tools in the calls you have left (for example, a comparison without a suspect
   column, a per-unit breakdown, or a grouped validation), run it now and report what it showed instead
   of leaving it to the reader. Hand off only what needs data, tools, or calls you do not have.
+- The same goes for explanations. Before you state why a result came out as it did (for example, that a
+  feature barely varies within each store), measure it if a tool call can; otherwise call it a hypothesis.
 - When your task is complete, call finish_step with a concise summary of what you found, written for the
   colleague who will write the final insights. Mention artifact ids for the results that matter.
 """.strip()
