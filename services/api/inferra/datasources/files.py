@@ -16,6 +16,7 @@ import pandas as pd
 from inferra import storage
 from inferra.datasources.base import QueryError, QueryResult, TableInfo
 
+VIEW_NAME = re.compile(r"[a-z][a-z0-9_]{0,59}")
 SUPPORTED_EXTENSIONS = {".csv", ".tsv", ".txt", ".parquet", ".xlsx", ".xls"}
 
 
@@ -96,9 +97,37 @@ class FileSource:
     def __init__(self, workspace_id: str, tables: list[tuple[TableInfo, str]]):
         self.workspace_id = workspace_id
         self._tables = tables  # (info, storage_key)
+        self._views: list[tuple[TableInfo, str]] = []  # (info, SELECT) defined during a run
 
     def list_tables(self) -> list[TableInfo]:
-        return [info for info, _ in self._tables]
+        return [info for info, _ in self._tables] + self.views
+
+    @property
+    def views(self) -> list[TableInfo]:
+        return [info for info, _ in self._views]
+
+    def add_view(self, name: str, sql: str, description: str | None = None) -> TableInfo:
+        """Name one SELECT (joins allowed) so later queries and tools can use it like a table. Views
+        live as long as this source, which is one run, and are created inside the sandbox."""
+        if not VIEW_NAME.fullmatch(name):
+            raise QueryError(
+                "View names use lowercase letters, digits and underscores, starting with a letter."
+            )
+        if any(t.name == name for t in self.list_tables()):
+            raise QueryError(f"A table named '{name}' already exists; choose another name.")
+        con = self._connect()
+        try:
+            sql = self._validated(con, sql)
+            try:
+                described = con.execute(f"DESCRIBE SELECT * FROM ({sql}) AS v").fetchall()
+                rows = con.execute(f"SELECT count(*) FROM ({sql}) AS v").fetchone()[0]  # type: ignore[index]
+            except duckdb.Error as exc:
+                raise QueryError(str(exc).split("\n")[0]) from exc
+        finally:
+            con.close()
+        info = TableInfo(name, [{"name": r[0], "type": r[1]} for r in described], int(rows), description)
+        self._views.append((info, sql))
+        return info
 
     def quote(self, identifier: str) -> str:
         return '"' + identifier.replace('"', '""') + '"'
@@ -127,6 +156,8 @@ class FileSource:
         con.execute(f"SET allowed_directories=['{allowed}']")
         con.execute("SET enable_external_access=false")
         con.execute("SET lock_configuration=true")
+        for info, sql in self._views:  # after the sandbox settings, so a view cannot reach past them
+            con.execute(f"CREATE VIEW {self.quote(info.name)} AS {sql}")
         return con
 
     def _validated(self, con: duckdb.DuckDBPyConnection, sql: str) -> str:

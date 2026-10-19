@@ -14,6 +14,7 @@ from inferra.agents.insight import write_insights
 from inferra.agents.orchestrator import dataset_catalog, plan_goal
 from inferra.agents.specialist import SPECIALISTS, StepTimeLimit, run_specialist
 from inferra.config import get_settings
+from inferra.datasources.base import TableInfo
 from inferra.datasources.registry import datasource_for
 from inferra.db.models import Artifact, Dataset, Insight, Run, Step, Workspace
 from inferra.llm.gateway import LLMUnavailable, get_llm
@@ -124,6 +125,7 @@ def _brief(
     done: list[Step],
     artifacts: list[Artifact],
     metrics: dict[str, dict[str, Any]] | None = None,
+    views: list[TableInfo] | None = None,
 ) -> str:
     plan = run.plan or {}
     by_step: dict[str, list[Artifact]] = {}
@@ -147,6 +149,13 @@ def _brief(
         "Datasets in scope (JSON):",
         json.dumps(dataset_catalog(datasets, f"{run.goal} {step.task}"), indent=1),
     ]
+    if views:
+        lines += ["", "Views created earlier in this run (use them like tables):"]
+        lines += [
+            f"- {v.name} ({v.row_count:,} rows): {v.description or ''} Columns: "
+            + ", ".join(c["name"] for c in v.columns)
+            for v in views
+        ]
     if done:
         lines += ["", "Results from earlier steps:"]
         for s in done:
@@ -243,7 +252,20 @@ def execute_run(db: Session, payload: dict[str, Any]) -> None:
                 if spec is None:
                     raise RuntimeError(f"No agent named '{step.agent}'.")
                 result = run_specialist(
-                    spec, step, _brief(run, step, datasets, completed, artifacts, ctx.metrics), ctx, llm, rec
+                    spec,
+                    step,
+                    _brief(
+                        run,
+                        step,
+                        datasets,
+                        completed,
+                        artifacts,
+                        ctx.metrics,
+                        getattr(ctx.source, "views", None),
+                    ),
+                    ctx,
+                    llm,
+                    rec,
                 )
                 step.summary = result.summary
             step.status, step.finished_at = "completed", _now()

@@ -51,7 +51,7 @@ Seven roles. Each specialist is just **a system prompt + an allowed tool set + a
 | Agent | Role | Example tools |
 |---|---|---|
 | **Orchestrator** | Understands the goal, asks clarifying questions, instantiates a workflow, dispatches steps, re-plans on failure | `classify_intent`, `list_datasets`, `instantiate_workflow` |
-| **Data Agent** | Finds and checks data: schema discovery, profiling, keys and joins, data quality, SQL | `profile_dataset`, `run_sql` (read-only), `analyze_keys`, `find_relationships` |
+| **Data Agent** | Finds and checks data: schema discovery, profiling, keys and joins, data quality, SQL | `profile_dataset`, `run_sql` (read-only), `create_view`, `analyze_keys`, `find_relationships` |
 | **Data Modeler** | Dimensional modeling: designs a star schema, writes the SQL transforms and tests, builds and fixes them | `analyze_keys`, `find_relationships`, `suggest_star_schema`, `build_data_model` |
 | **Analyst Agent** | Descriptive and diagnostic analysis plus statistical modeling | `compute_metric`, `segment_breakdown`, `funnel`, `retention`, `decompose_metric_change`, `fit_regression`, `diff_in_diff`, `propensity_match`, `forecast` |
 | **Experiment Agent** | A/B test design and analysis | `power_analysis`, `srm_check`, `ab_test`, `cuped_adjust`, `sequential_test`, `bayesian_ab`, `multiple_testing_correct` |
@@ -233,6 +233,10 @@ class DataSource(Protocol):
 Every dataset, whatever its origin, is a Parquet file queried by a sandboxed in-process DuckDB
 (single SELECT, file access limited to the workspace's directory, configuration locked). Tools never
 see where data came from.
+
+Statistical and ML tools read one table, so agents join tables first with `create_view`: one
+validated SELECT, named for the rest of the run and listed in later steps' briefs. Views are created
+inside the same sandbox, after its settings are locked, and live only as long as the run's source.
 
 | Source | Phase | How it works |
 |---|---|---|

@@ -309,3 +309,92 @@ def test_grouped_validation_holds_out_whole_groups(tmp_path: Path) -> None:
     assert [f["name"] for f in listed.artifact.data["features"]] == ["temp"]
     with pytest.raises(ToolError, match="at least 10 groups"):
         run(ctx, "train_model", target="sales", group_column="size", where="store < 5")
+
+
+# --- views over several tables ------------------------------------------------------------------
+
+
+def multi_table_ctx(tmp_path: Path, frames: dict[str, pd.DataFrame], workspace: str = "ws") -> ToolContext:
+    tables = []
+    for name, frame in frames.items():
+        path = tmp_path / f"{name}.csv"
+        frame.to_csv(path, index=False)
+        key = f"workspaces/{workspace}/{name}.parquet"
+        rows, columns = convert_to_parquet(path, storage.local_path(key))
+        tables.append((TableInfo(name, columns, rows), key))
+    return ToolContext(source=FileSource(workspace, tables))
+
+
+def test_a_view_joins_tables_so_single_table_tools_can_use_them(tmp_path: Path) -> None:
+    # Orders with several items each; the score depends on lateness and on the order's freight.
+    rng = np.random.default_rng(9)
+    n = 3000
+    orders = pd.DataFrame({"order_id": np.arange(n), "late": (rng.random(n) < 0.2).astype(int)})
+    items = pd.DataFrame({"order_id": np.repeat(orders.order_id, 2), "freight": rng.uniform(5, 50, 2 * n)})
+    freight = items.groupby("order_id").freight.sum().to_numpy()
+    reviews = pd.DataFrame(
+        {
+            "order_id": orders.order_id,
+            "score": 4.5 - 1.5 * orders.late - 0.01 * freight + rng.normal(0, 0.5, n),
+        }
+    )
+    ctx = multi_table_ctx(tmp_path, {"orders": orders, "items": items, "reviews": reviews})
+    sql = """
+        SELECT o.order_id, o.late, f.freight, r.score
+        FROM orders o
+        JOIN (SELECT order_id, sum(freight) AS freight FROM items GROUP BY 1) f USING (order_id)
+        JOIN reviews r USING (order_id)
+    """
+    out = get_tool("create_view").run(
+        ctx, {"name": "order_reviews", "sql": sql, "description": "One row per order."}
+    )
+    assert out.result["total_rows"] == n and out.artifact.kind == "table"
+    assert "order_reviews" in {t.name for t in ctx.source.list_tables()}
+
+    fit = (
+        get_tool("fit_regression")
+        .run(ctx, {"table": "order_reviews", "target": "score", "features": ["late", "freight"]})
+        .artifact.data
+    )
+    late = next(c for c in fit["coefficients"] if c["term"] == "late")
+    assert late["ci_low"] < -1.5 < late["ci_high"]
+
+    # A later view can build on an earlier one; names cannot collide.
+    get_tool("create_view").run(
+        ctx, {"name": "late_orders", "sql": "SELECT * FROM order_reviews WHERE late = 1", "description": "x"}
+    )
+    with pytest.raises(ToolError, match="already exists"):
+        get_tool("create_view").run(ctx, {"name": "orders", "sql": "SELECT 1 AS x", "description": "x"})
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DROP VIEW orders",
+        "SELECT 1; SELECT 2",
+        "SELECT * FROM read_csv('/etc/passwd')",
+        "SELECT * FROM read_parquet('OTHER')",
+    ],
+)
+def test_views_stay_inside_the_sandbox(tmp_path: Path, sql: str) -> None:
+    frame = pd.DataFrame({"x": [1, 2, 3]})
+    multi_table_ctx(tmp_path, {"orders": frame}, workspace="other")  # another workspace's file
+    ctx = multi_table_ctx(tmp_path, {"orders": frame})
+    sql = sql.replace("OTHER", str(storage.local_path("workspaces/other/orders.parquet")))
+    with pytest.raises(ToolError):
+        get_tool("create_view").run(ctx, {"name": "leak", "sql": sql, "description": "x"})
+    assert [t.name for t in ctx.source.list_tables()] == ["orders"]
+
+
+def test_later_steps_are_told_about_views() -> None:
+    from types import SimpleNamespace
+
+    from inferra.runtime.executor import _brief
+
+    run = SimpleNamespace(
+        plan={"title": "t", "params": {}}, goal="g", intent="estimate_effect", clarifications=[]
+    )
+    step = SimpleNamespace(task="estimate")
+    view = TableInfo("order_reviews", [{"name": "late", "type": "INTEGER"}], 1234, "One row per order.")
+    brief = _brief(run, step, [], [], [], None, [view])  # type: ignore[arg-type]
+    assert "- order_reviews (1,234 rows): One row per order. Columns: late" in brief
