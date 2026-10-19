@@ -157,6 +157,12 @@ def _brief(
     return "\n".join(lines)
 
 
+def verifier_context(db: Session, run: Run) -> str:
+    """Text whose numbers an insight may repeat without a citation: the goal, the plan's parameters,
+    the user's clarifications, and table and column names."""
+    return _context_text(run, _datasets(db, run.workspace_id, list(run.dataset_ids)))
+
+
 def _context_text(run: Run, datasets: list[Dataset]) -> str:
     parts = [run.goal, json.dumps((run.plan or {}).get("params", {}))]
     parts += [c.get("answer") or "" for c in run.clarifications]

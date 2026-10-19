@@ -255,7 +255,10 @@ class Insight(TimestampMixin, Base):
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
     # draft | accepted | edited | rejected
     status: Mapped[str] = mapped_column(String(20), default="draft")
+    # What the agent wrote, kept when a reviewer edits the field.
     original_claim: Mapped[str | None] = mapped_column(Text)
+    original_title: Mapped[str | None] = mapped_column(String(300))
+    original_action: Mapped[str | None] = mapped_column(Text)
     review_note: Mapped[str | None] = mapped_column(Text)
     reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

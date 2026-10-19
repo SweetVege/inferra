@@ -118,6 +118,8 @@ def build_content(db: Session, report: Report) -> dict[str, Any]:
                 "claim": i.claim,
                 "edited": i.status == "edited",
                 "original_claim": i.original_claim,
+                "original_title": i.original_title,
+                "original_action": i.original_action,
                 "evidence": i.evidence,
                 "method": i.method,
                 "caveats": i.caveats,

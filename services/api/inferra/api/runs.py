@@ -234,17 +234,58 @@ def review_insight(
     if insight is None or run is None or run.workspace_id != access.workspace.id:
         raise HTTPException(404, "Insight not found.")
     if body.status == "edited":
-        if not body.claim or not body.claim.strip():
-            raise HTTPException(400, "An edited insight needs the revised claim.")
-        if insight.original_claim is None:
-            insight.original_claim = insight.claim
-        insight.claim = body.claim.strip()
+        _apply_edit(db, run, insight, body)
     insight.status = body.status
     insight.review_note = body.note
     insight.reviewed_by = access.user.id if body.status != "draft" else None
     insight.reviewed_at = datetime.now(UTC) if body.status != "draft" else None
     db.commit()
     return insight
+
+
+# Editable field -> the column that keeps what the agent wrote.
+EDITABLE = {"title": "original_title", "claim": "original_claim", "recommended_action": "original_action"}
+
+
+def _apply_edit(db: Session, run: Run, insight: Insight, body: InsightReview) -> None:
+    """Apply a reviewer's rewrite and run the verifier on it, so "Verified" keeps meaning that every
+    number traces back to a tool's output. An edit that would break a verified insight is refused."""
+    from inferra.runtime.executor import verifier_context
+    from inferra.verify.verifier import verify_insight
+
+    changes = {
+        field: value.strip()
+        for field in EDITABLE
+        if (value := getattr(body, field)) is not None and value.strip() != (getattr(insight, field) or "")
+    }
+    if not changes.get("title", "x") or not changes.get("claim", "x"):
+        raise HTTPException(400, "The title and the claim cannot be empty.")
+    if not changes and insight.status != "edited":
+        raise HTTPException(400, "Nothing was changed.")
+
+    draft = {
+        "title": changes.get("title", insight.title),
+        "claim": changes.get("claim", insight.claim),
+        "recommended_action": changes.get("recommended_action", insight.recommended_action),
+        "caveats": insight.caveats,
+        "evidence": insight.evidence,
+        "confidence": insight.confidence,
+    }
+    artifacts = db.scalars(select(Artifact).where(Artifact.run_id == run.id))
+    verdict = verify_insight(
+        draft, {a.id: {"kind": a.kind, "data": a.data} for a in artifacts}, verifier_context(db, run)
+    )
+    if insight.verified and not verdict.verified:
+        raise HTTPException(
+            422, "This edit would no longer pass verification. " + "; ".join(verdict.failures())
+        )
+    for field, value in changes.items():
+        original = EDITABLE[field]
+        if getattr(insight, original) is None:
+            setattr(insight, original, getattr(insight, field) or "")
+        setattr(insight, field, value or None)  # an emptied next step is removed
+    insight.checks = [c.as_dict() for c in verdict.checks]
+    insight.verified = verdict.verified
 
 
 @router.get("/insights", response_model=list[InsightFeedItem])
