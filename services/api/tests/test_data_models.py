@@ -63,6 +63,35 @@ def test_composite_grain_is_minimal_and_duplicates_are_counted() -> None:
     assert orders["duplicate_rows"] == 12 and orders["grain"] == ["order_id"]
 
 
+def test_a_unique_measure_is_not_the_grain(tmp_path: Path) -> None:
+    """Walmart-style weekly sales: every Weekly_Sales value happens to be unique, but the grain is
+    store and week."""
+    import numpy as np
+    import pandas as pd
+
+    from inferra import storage
+
+    rng = np.random.default_rng(5)
+    weeks = pd.date_range("2010-02-05", periods=30, freq="W-FRI")
+    frame = pd.DataFrame(
+        [
+            (store, week.date(), float(rng.uniform(2e5, 3e6)), int(week.month == 11))
+            for store in range(1, 46)
+            for week in weeks
+        ],
+        columns=["Store", "Date", "Weekly_Sales", "Holiday_Flag"],
+    )
+    csv = tmp_path / "walmart.csv"
+    frame.to_csv(csv, index=False)
+    rows, cols = convert_to_parquet(csv, storage.local_path("workspaces/w1/walmart.parquet"))
+    source = FileSource("w1", [(TableInfo("walmart", cols, rows), "workspaces/w1/walmart.parquet")])
+
+    a = analyze_table(source, "walmart")
+    assert sorted(a["grain"]) == ["Date", "Store"]
+    assert ["Weekly_Sales"] not in a["candidate_keys"]
+    assert "Weekly_Sales" in a["measures"] and "Store" not in a["measures"]
+
+
 def test_suggested_star_schema_builds_and_its_tests_find_guest_orders() -> None:
     source = source_for("retail_order_lines")
     analysis = analyze_table(source, "retail_order_lines")

@@ -17,6 +17,7 @@ NUMERIC = re.compile(
     r"^(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT|FLOAT|DOUBLE|REAL|DECIMAL)",
     re.I,
 )
+INTEGER = re.compile(r"^(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT)", re.I)
 MAX_VIOLATION_SHARE = 0.02
 MAX_COMPOSITE_CANDIDATES = 6
 ACCEPTED_VALUES_MAX = 10
@@ -65,14 +66,24 @@ def analyze_table(source: DataSource, table: str) -> dict[str, Any]:
                     or (types[c].upper() == "VARCHAR" and non_null > 0 and dates == non_null),
                     "id_like": bool(ID_LIKE.search(c)),
                     "numeric": bool(NUMERIC.match(types[c])),
+                    "integer": bool(INTEGER.match(types[c])),
                 }
             )
         by_name = {c["name"]: c for c in columns}
 
-        single_keys = [[c["name"]] for c in columns if c["distinct"] == distinct_rows and c["nulls"] == 0]
+        # A continuous measure (weekly sales, a price) can be unique by chance; it is not a key.
+        single_keys = [
+            [c["name"]]
+            for c in columns
+            if c["distinct"] == distinct_rows and c["nulls"] == 0 and not (c["numeric"] and not c["integer"])
+        ]
         composite: list[list[str]] = []
         if not single_keys:
-            found = _composite_key(con, columns, distinct_rows)
+            # Integer columns may be codes (a store number) or counts (sessions): try them only
+            # when the other columns cannot identify a row.
+            found = _composite_key(con, columns, distinct_rows) or _composite_key(
+                con, columns, distinct_rows, integers=True
+            )
             if found:
                 composite.append(found)
         candidate_keys = single_keys + composite
@@ -172,7 +183,9 @@ def analyze_table(source: DataSource, table: str) -> dict[str, Any]:
     }
 
 
-def _composite_key(con: Any, columns: list[dict[str, Any]], rows: int) -> list[str] | None:
+def _composite_key(
+    con: Any, columns: list[dict[str, Any]], rows: int, integers: bool = False
+) -> list[str] | None:
     """Greedy search for a small set of identifying columns: add whichever column separates the
     most rows, then drop any column the rest make redundant."""
     candidates = [
@@ -180,7 +193,11 @@ def _composite_key(con: Any, columns: list[dict[str, Any]], rows: int) -> list[s
         for c in columns
         if c["nulls"] == 0
         and c["distinct"] > 1
-        and (c["id_like"] or c["date_like"] or (not c["numeric"] and c["distinct"] <= 1000))
+        and (
+            c["id_like"]
+            or c["date_like"]
+            or ((not c["numeric"] or (integers and c["integer"])) and c["distinct"] <= 1000)
+        )
     ][: MAX_COMPOSITE_CANDIDATES * 2]
 
     def count(cols: list[str]) -> int:
