@@ -44,7 +44,7 @@ DEMO_RUNS = [
     {
         "file": "checkout_experiment.csv",
         "goal": "Did the new checkout test win? Check conversion, and make sure latency did not get worse.",
-        "accept": 1,
+        "accept": 2,  # the conversion win and the latency guardrail it has to weigh
     },
     {
         "file": "customer_churn.csv",
@@ -80,9 +80,9 @@ DEMO_RUNS = [
 
 
 REPORT_SUMMARY = (
-    "The redesigned checkout lifted conversion without slowing checkout down, so it is ready to roll "
-    "out. Separately, signup conversion stepped down in late September; the drop sits in one Android "
-    "release, and the weekly monitor is still flagging it."
+    "The redesigned checkout lifted conversion, but it also made checkout slower, so it should roll "
+    "out with a latency budget. Separately, signup conversion stepped down in late September; the drop "
+    "sits in one Android release, and the weekly monitor is still flagging it."
 )
 
 
@@ -180,10 +180,14 @@ def seed_demo(reset: bool = False) -> str:
 
 
 def _is_current(db: Session, workspace_id: str) -> bool:
-    """The demo matches this release when it has the same goals and its shared report."""
+    """The demo matches this release when it has the same goals and the same shared report."""
     goals = sorted(db.scalars(select(Run.goal).where(Run.workspace_id == workspace_id)))
     report = db.scalars(select(Report).where(Report.workspace_id == workspace_id)).first()
-    return goals == sorted(spec["goal"] for spec in DEMO_RUNS) and report is not None
+    return (
+        goals == sorted(spec["goal"] for spec in DEMO_RUNS)
+        and report is not None
+        and report.summary == REPORT_SUMMARY
+    )
 
 
 def demo_share_token() -> str:

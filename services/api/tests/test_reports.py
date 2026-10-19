@@ -117,7 +117,7 @@ def test_demo_report_is_shared_and_read_only(client: TestClient) -> None:
     assert len(reports) == 1 and reports[0]["shared"] and reports[0]["state"] == "published"
     detail = client.get(f"/api/workspaces/{demo['id']}/reports/{reports[0]['id']}").json()
     snapshot = client.get(f"/api/public/reports/{detail['share_token']}").json()
-    assert len(snapshot["insights"]) == 4 and all(i["verified"] for i in snapshot["insights"])
+    assert len(snapshot["insights"]) == 5 and all(i["verified"] for i in snapshot["insights"])
     assert client.post(f"/api/workspaces/{demo['id']}/reports/{reports[0]['id']}/publish").status_code == 403
 
     schedules = client.get(f"/api/workspaces/{demo['id']}/schedules").json()
@@ -138,6 +138,11 @@ def test_demo_rebuilds_when_outdated_and_keeps_its_link(client: TestClient) -> N
         db.query(Report).delete()  # what an older release's demo looks like
     rebuilt = seed_demo()
     assert rebuilt != first
+    with session_scope() as db:
+        db.query(Report).one().summary = "An older summary."  # a release that rewrote the summary
+    resummarized = seed_demo()
+    assert resummarized != rebuilt
+    rebuilt = resummarized
 
     demo = next(w for w in client.get("/api/workspaces").json() if w["is_demo"])
     assert demo["id"] == rebuilt  # grace kept her access

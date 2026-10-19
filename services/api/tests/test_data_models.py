@@ -228,7 +228,16 @@ def test_data_model_api_suggest_edit_build_publish_export(client: TestClient) ->
     assert still["data_model_id"] is None
 
 
-def test_model_data_run_end_to_end(client: TestClient) -> None:
+def test_model_data_run_end_to_end(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import itertools
+    from datetime import UTC, datetime, timedelta
+
+    from inferra.runtime import recorder
+
+    # A clock that always moves on, so built_at and updated_at differ if they are read separately.
+    ticks = itertools.count()
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr(recorder, "utcnow", lambda: start + timedelta(microseconds=next(ticks)))
     ws = login(client)
     upload(client, ws, SAMPLES / "retail_order_lines.csv")
     use_llm(demo_script)
@@ -250,3 +259,5 @@ def test_model_data_run_end_to_end(client: TestClient) -> None:
     assert len(models) == 1 and models[0]["run_id"] == run["id"]
     art = next(a for a in run["artifacts"] if a["kind"] == "data_model")
     assert art["data"]["data_model_id"] == models[0]["id"]
+    detail = client.get(f"/api/workspaces/{ws}/data-models/{models[0]['id']}").json()
+    assert not detail["stale"]  # just built by the run: no "changes since the last build"

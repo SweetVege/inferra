@@ -62,7 +62,8 @@ class Recorder:
             )
             self.db.add(model)
         model.name, model.description, model.nodes = draft.name, draft.description, draft.nodes
-        model.last_build, model.built_at, model.updated_at = draft.build, utcnow(), utcnow()
+        now = utcnow()  # one instant: a later updated_at would mark the fresh build as stale
+        model.last_build, model.built_at, model.updated_at = draft.build, now, now
         self.db.commit()
         return model.id
 
