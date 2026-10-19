@@ -401,3 +401,59 @@ def test_later_steps_are_told_about_views() -> None:
     view = TableInfo("order_reviews", [{"name": "late", "type": "INTEGER"}], 1234, "One row per order.")
     brief = _brief(run, step, [], [], [], None, [view])  # type: ignore[arg-type]
     assert "- order_reviews (1,234 rows): One row per order. Columns: late" in brief
+
+
+def test_tools_handle_the_nullable_columns_a_join_returns(tmp_path: Path) -> None:
+    # A comparison on a missing date is NULL, so DuckDB hands pandas nullable boolean and integer
+    # columns; regression once crashed on them in its multicollinearity check.
+    rng = np.random.default_rng(10)
+    n = 1500
+    start = pd.Timestamp("2017-01-01") + pd.to_timedelta(rng.integers(0, 300, n), unit="D")
+    orders = pd.DataFrame(
+        {
+            "order_id": np.arange(n),
+            "purchased": start,
+            "estimated": start + pd.to_timedelta(20, unit="D"),
+            "delivered": start + pd.to_timedelta(rng.integers(5, 35, n), unit="D"),
+            "freight": rng.uniform(1, 50, n),
+        }
+    )
+    orders.loc[:30, "delivered"] = pd.NaT
+    late = (orders.delivered > orders.estimated).astype(float)
+    reviews = pd.DataFrame({"order_id": orders.order_id, "score": 4.5 - 1.5 * late + rng.normal(0, 0.5, n)})
+    ctx = multi_table_ctx(tmp_path, {"orders": orders, "reviews": reviews})
+    sql = """
+        SELECT o.order_id, o.delivered > o.estimated AS late, (o.delivered > o.estimated)::INT AS late_i,
+               o.freight, o.purchased, o.delivered - o.purchased AS took, r.score
+        FROM orders o JOIN reviews r USING (order_id)
+    """
+    get_tool("create_view").run(ctx, {"name": "v", "sql": sql, "description": "One row per order."})
+
+    fit = get_tool("fit_regression").run(
+        ctx, {"table": "v", "target": "score", "features": ["late", "freight", "purchased", "took"]}
+    )
+    late_term = next(c for c in fit.artifact.data["coefficients"] if c["term"] == "late")
+    assert late_term["ci_low"] < -1.5 < late_term["ci_high"]
+    assert fit.artifact.data["dropped_rows"] == 31  # the undelivered orders, not garbage values
+    match = get_tool("propensity_match").run(
+        ctx, {"table": "v", "treatment_column": "late_i", "outcome": "score", "covariates": ["freight"]}
+    )
+    assert match.artifact is not None
+
+
+def test_an_unexpected_tool_error_costs_one_call_not_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from inferra.agents import specialist
+
+    def broken(ctx: object, args: dict) -> None:
+        raise AttributeError("'float' object has no attribute 'shape'")
+
+    calls: list[dict] = []
+    rec = SimpleNamespace(event=lambda *a, **k: None, tool_call=lambda *a, **k: calls.append(k))
+    tool = SimpleNamespace(run=broken)
+    use = SimpleNamespace(id="toolu_1", name="fit_regression", input={})
+    spec = SimpleNamespace(title="Analyst Agent", name="analyst")
+    result = specialist._execute(tool, use, SimpleNamespace(key="s"), spec, None, rec, [])
+    assert result["is_error"] and "internal error (AttributeError" in result["content"]
+    assert "AttributeError" in calls[0]["error"]

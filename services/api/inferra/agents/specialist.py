@@ -1,6 +1,7 @@
 """Specialist agents: a system prompt, an allowed tool set, and one shared tool-use loop."""
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -13,6 +14,7 @@ from inferra.runtime.recorder import Recorder
 from inferra.tools.base import ToolContext, ToolError, get_tools
 
 MAX_RESULT_CHARS = 12000
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -202,7 +204,17 @@ def _execute(tool, use, step, spec, ctx, rec, produced) -> dict[str, Any]:  # ty
     rec.event("tool_started", f"{spec.title} → {use.name}", step=step.key, tool=use.name)
     try:
         output = tool.run(ctx, dict(use.input))
-    except ToolError as exc:
+    except Exception as exc:
+        # A bug in one tool should cost one call, not the whole run: the agent hears what failed and
+        # can try other inputs or another method, and the traceback goes to the server log.
+        if isinstance(exc, ToolError):
+            message = str(exc)
+        else:
+            log.exception("Tool %s failed", use.name)
+            message = (
+                f"{use.name} failed with an internal error ({type(exc).__name__}: {exc}). This is a bug "
+                "in the tool, not in your input; try another method or different columns."
+            )
         rec.tool_call(
             step,
             spec.name,
@@ -210,10 +222,10 @@ def _execute(tool, use, step, spec, ctx, rec, produced) -> dict[str, Any]:  # ty
             dict(use.input),
             code=None,
             artifact_id=None,
-            error=str(exc),
+            error=message,
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
-        return _error(use.id, str(exc))
+        return _error(use.id, message)
     artifact_id = None
     if output.model is not None:
         model_id = rec.model(output.model)
