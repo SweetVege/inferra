@@ -34,6 +34,7 @@ Public Kaggle datasets, run on the live deployment with a real model and reviewe
 |---|---|---|
 | [Cookie Cats](https://inferra-demo.vercel.app/r/pHet7uCTv6eOYl5ZHNrBFnm0bllHxzYJ) (mobile game A/B test, 90,189 players) | Should the first gate move from level 30 to level 40? | No: 7-day retention fell by 0.82 percentage points (p=0.0016), with no offsetting gain in 1-day retention or engagement. Matches the published analyses of this dataset. |
 | [Telco Customer Churn](https://inferra-demo.vercel.app/r/NNSOi5qdxdWFu_4rLa3LtNtN3PKilNKj) (7,043 customers) | Who churns, and do longer contracts help? | A churn model ranks customers well on held-out data (AUC 0.848; contract type, tenure, and internet and security services drive it). Two-year customers churn far less than month-to-month ones even after adjusting for tenure and charges (odds ratio 0.158), reported as an association, with the adjustment's caveats, not as an effect of the contract. |
+| [Walmart weekly sales](https://inferra-demo.vercel.app/r/6OAEIAGfOei-Vvu6k8XigR_Rjfh4tG4L) (45 stores, 143 weeks) | What do holidays and the economy explain? | Holiday weeks sell about 7.8% more, almost all of it Thanksgiving, from only 10 independent holiday weeks. Unemployment, fuel price, CPI and temperature look predictive on a random split (R² 0.30), but the agent held out whole stores on its own and the skill vanished (R² −0.25, worse than predicting the mean): the model was recognizing stores, not learning from the economy. |
 
 ## Status
 
