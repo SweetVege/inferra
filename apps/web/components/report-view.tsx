@@ -3,6 +3,7 @@
 import { Check, ChevronRight, ShieldAlert, ShieldCheck, UserCheck } from "lucide-react";
 
 import { ArtifactView } from "@/components/artifact-view";
+import { Markdown } from "@/components/markdown";
 import { AGENTS, Badge, Card, CodeBlock } from "@/components/ui";
 import { formatNumber, titleCase } from "@/lib/format";
 import type { ReportContent } from "@/lib/types";
@@ -137,8 +138,9 @@ export function ReportView({ content, draft = false }: { content: ReportContent;
               </p>
               <ol className="list-decimal space-y-1 pl-5 text-ink-2">
                 {a.steps.map((s, i) => (
-                  <li key={i}>
-                    <span className="font-medium text-ink">{AGENTS[s.agent]?.title ?? s.agent}:</span> {s.summary ?? s.task}
+                  <li key={i} className="space-y-1">
+                    <span className="font-medium text-ink">{AGENTS[s.agent]?.title ?? s.agent}</span>
+                    <Markdown>{s.summary ?? s.task}</Markdown>
                   </li>
                 ))}
               </ol>

@@ -4,6 +4,7 @@ The Orchestrator classifies a goal into one of these intents and fills in its pa
 skip optional steps, but it cannot invent new ones. Intents marked unavailable are recognized so
 Inferra can say clearly that a capability is on the roadmap instead of improvising."""
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,7 +20,7 @@ class Param:
 class StepTemplate:
     key: str
     agent: str  # data | analyst | experiment | ml | modeler | insight
-    task: str  # may reference {params} with str.format-style placeholders
+    task: str  # {param} placeholders; a [bracketed clause] is dropped unless all its params are set
     depends_on: tuple[str, ...] = ()
     optional: bool = False
 
@@ -55,13 +56,13 @@ WORKFLOWS: dict[str, Workflow] = {
                     "profile",
                     "data",
                     "Profile each dataset in scope and identify data-quality issues that could "
-                    "affect analysis. Focus: {focus}.",
+                    "affect analysis.[ Focus: {focus}.]",
                 ),
                 StepTemplate(
                     "patterns",
                     "analyst",
                     "Find the most informative distributions, segment differences, and "
-                    "relationships between columns. Focus: {focus}.",
+                    "relationships between columns.[ Focus: {focus}.]",
                     depends_on=("profile",),
                 ),
                 StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("profile", "patterns")),
@@ -82,14 +83,14 @@ WORKFLOWS: dict[str, Workflow] = {
                     "prepare",
                     "data",
                     "Find the defined metric or the tables and columns that express '{metric}', check "
-                    "they are usable, and note any data issues that affect it. Filters: {filters}.",
+                    "they are usable, and note any data issues that affect it.[ Filters: {filters}.]",
                 ),
                 StepTemplate(
                     "compute",
                     "analyst",
-                    "Compute '{metric}' broken down by {breakdown}, applying filters: {filters}. Use "
-                    "compute_metric for defined metrics and SQL otherwise. Report totals alongside the "
-                    "breakdown.",
+                    "Compute '{metric}'[ broken down by {breakdown}][, applying filters: {filters}]. Use "
+                    "compute_metric for defined metrics and SQL otherwise.[ Report totals alongside the "
+                    "{breakdown} breakdown.]",
                     depends_on=("prepare",),
                 ),
                 StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("prepare", "compute")),
@@ -111,15 +112,16 @@ WORKFLOWS: dict[str, Workflow] = {
                     "check",
                     "data",
                     "Check whether '{metric}' changed because of the data itself: missing days, "
-                    "volume drops that suggest broken tracking, or new values in the dimensions "
-                    "({dimensions}).",
+                    "volume drops that suggest broken tracking, or new values in the dimensions"
+                    "[ ({dimensions})].",
                 ),
                 StepTemplate(
                     "diagnose",
                     "analyst",
                     "Find when '{metric}' changed (detect_anomalies), then decompose the change between "
-                    "the baseline ({baseline_period}) and the comparison ({comparison_period}) across "
-                    "{dimensions}. Drill into the top segment with a filter to confirm where the change "
+                    "the baseline[ ({baseline_period})] and the comparison[ ({comparison_period})] across "
+                    "the dimensions that best explain it[ ({dimensions})]. Drill into the top segment with "
+                    "a filter to confirm where the change "
                     "sits, and separate mix effects from rate effects.",
                     depends_on=("check",),
                 ),
@@ -146,13 +148,13 @@ WORKFLOWS: dict[str, Workflow] = {
                     "baseline",
                     "data",
                     "Locate '{metric}' and check it is usable as a test metric (type, missing values, "
-                    "unit of analysis). Identify a date column for traffic: {date_column}.",
+                    "unit of analysis). Identify a date column for traffic[: {date_column}].",
                 ),
                 StepTemplate(
                     "power",
                     "experiment",
-                    "Measure the baseline of '{metric}' and daily traffic, then run a power analysis for "
-                    "MDE {mde} with {variants} variants (daily traffic: {daily_traffic}). Show how the "
+                    "Measure the baseline of '{metric}' and daily traffic[ (stated: {daily_traffic})], then "
+                    "run a power analysis[ for an MDE of {mde}][ with {variants} variants]. Show how the "
                     "detectable effect shrinks with longer durations.",
                     depends_on=("baseline",),
                 ),
@@ -180,17 +182,17 @@ WORKFLOWS: dict[str, Workflow] = {
                 StepTemplate(
                     "validate",
                     "data",
-                    "Validate the experiment data: the variant column '{variant_column}' and its labels "
-                    "(control: {control}), one row per unit, and usable metric columns "
-                    "({primary_metric}; guardrails: {guardrail_metrics}; covariate: {covariate}).",
+                    "Validate the experiment data: the variant column '{variant_column}' and its labels"
+                    "[ (control: {control})], one row per unit, and usable metric columns "
+                    "({primary_metric}[; guardrails: {guardrail_metrics}][; covariate: {covariate}]).",
                 ),
                 StepTemplate(
                     "analyze",
                     "experiment",
-                    "Analyze the test. Check sample ratio first. Test the primary metric '{primary_metric}' "
-                    "(with CUPED on {covariate} when available), each guardrail ({guardrail_metrics}), "
-                    "effects by segment ({segments}), the Bayesian probability that treatment wins, and an "
-                    "always-valid sequential read over {date_column}.",
+                    "Analyze the test. Check sample ratio first. Test the primary metric '{primary_metric}'"
+                    "[ (with CUPED on {covariate})][ and each guardrail ({guardrail_metrics})]."
+                    "[ Break the effect down by {segments}.] Estimate the Bayesian probability that "
+                    "treatment wins.[ Add an always-valid sequential read over {date_column}.]",
                     depends_on=("validate",),
                 ),
                 StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("validate", "analyze")),
@@ -226,14 +228,15 @@ WORKFLOWS: dict[str, Workflow] = {
                     "prepare",
                     "data",
                     "Check the data for estimating the effect of {treatment} on {outcome}: treatment and "
-                    "outcome definitions, unit and time structure ({unit_column}, {time_column}), and "
-                    "whether covariates ({covariates}) are measured before treatment.",
+                    "outcome definitions, unit and time structure[ ({unit_column}, {time_column})], and "
+                    "whether covariates[ ({covariates})] are measured before treatment.",
                 ),
                 StepTemplate(
                     "estimate",
                     "analyst",
-                    "Estimate the effect of {treatment} on {outcome} using {method} (post_start: "
-                    "{post_start}; covariates: {covariates}). Check the method's assumptions (pre-trends "
+                    "Estimate the effect of {treatment} on {outcome}[ using {method}]"
+                    "[ (treatment starts {post_start})][, controlling for {covariates}]. Check the method's "
+                    "assumptions (pre-trends "
                     "or covariate balance) and run a simpler cross-check.",
                     depends_on=("prepare",),
                 ),
@@ -255,13 +258,13 @@ WORKFLOWS: dict[str, Workflow] = {
                     "prepare",
                     "data",
                     "Check that '{target}' is a usable label (type, missing values, class balance) and flag "
-                    "columns that could leak the outcome (recorded after it). Population: {population}.",
+                    "columns that could leak the outcome (recorded after it).[ Population: {population}.]",
                 ),
                 StepTemplate(
                     "train",
                     "ml",
-                    "Train and evaluate a model for '{target}' (features: {features}; population: "
-                    "{population}). Compare against the baseline and explain the main drivers.",
+                    "Train and evaluate a model for '{target}'[ using {features}][, restricted to "
+                    "{population}]. Compare against the baseline and explain the main drivers.",
                     depends_on=("prepare",),
                 ),
                 StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("prepare", "train")),
@@ -288,7 +291,7 @@ WORKFLOWS: dict[str, Workflow] = {
                 StepTemplate(
                     "forecast",
                     "analyst",
-                    "Forecast '{metric}' by {freq} for {horizon} periods with prediction intervals, and "
+                    "Forecast '{metric}'[ by {freq}][ for {horizon} periods] with prediction intervals, and "
                     "report how the model did in the backtest compared with the seasonal-naive baseline.",
                     depends_on=("prepare",),
                 ),
@@ -312,14 +315,14 @@ WORKFLOWS: dict[str, Workflow] = {
                 StepTemplate(
                     "inspect",
                     "data",
-                    "Inspect the source tables for modeling {subject}: profile them, find each table's "
+                    "Inspect the source tables[ for modeling {subject}]: profile them, find each table's "
                     "grain with analyze_keys, and when there are several tables, how they join. Flag "
                     "duplicates, missing keys, and attributes that are not stable for their entity.",
                 ),
                 StepTemplate(
                     "model",
                     "modeler",
-                    "Design a star schema for {subject} (requirements: {requirements}). Build it with "
+                    "Design a star schema[ for {subject}][ (requirements: {requirements})]. Build it with "
                     "build_data_model, fix any node that fails, and report the grain, the dimensions, "
                     "and the test results, including what the failing rows have in common.",
                     depends_on=("inspect",),
@@ -347,16 +350,17 @@ WORKFLOWS: dict[str, Workflow] = {
                 StepTemplate(
                     "check",
                     "data",
-                    "Confirm '{metric}' is defined or computable, and check that the latest {cadence} "
+                    "Confirm '{metric}' is defined or computable, and check that the latest[ {cadence}] "
                     "period is complete and that volumes look normal, since broken tracking would look "
                     "like a metric move.",
                 ),
                 StepTemplate(
                     "watch",
                     "analyst",
-                    "Run check_metric for '{metric}' per {cadence} period against its trailing baseline, "
-                    "alerting on a {direction} move beyond a relative change of {threshold}. If it alerts, "
-                    "decompose the change between the baseline and the latest period across {dimensions}.",
+                    "Run check_metric for '{metric}'[ per {cadence} period] against its trailing baseline"
+                    "[ (alert direction: {direction})][, alerting beyond a relative change of {threshold}]. "
+                    "If it alerts, decompose the change between the baseline and the latest period"
+                    "[ across {dimensions}].",
                     depends_on=("check",),
                 ),
                 StepTemplate("insights", "insight", INSIGHT_TASK, depends_on=("check", "watch")),
@@ -366,16 +370,29 @@ WORKFLOWS: dict[str, Workflow] = {
 }
 
 
-class _Blank(dict[str, str]):
-    def __missing__(self, key: str) -> str:
-        return "not specified"
+_OPTIONAL = re.compile(r"\[([^\[\]]*)\]")
+_PLACEHOLDER = re.compile(r"\{(\w+)\}")
+_EMPTY = {"", "none", "n/a", "na", "null", "not specified", "unspecified", "unknown"}
+
+
+def fill(task: str, values: dict[str, str]) -> str:
+    """Fill a step's task. Optional clauses whose params are missing drop out entirely, so a plan
+    never reads "with CUPED on not specified"."""
+
+    def clause(match: re.Match[str]) -> str:
+        inner = match.group(1)
+        return inner if all(values.get(k) for k in _PLACEHOLDER.findall(inner)) else ""
+
+    text = _OPTIONAL.sub(clause, task)
+    text = _PLACEHOLDER.sub(lambda m: values.get(m.group(1)) or "not specified", text)
+    return re.sub(r" {2,}", " ", text).strip()
 
 
 def instantiate(intent: str, params: dict[str, str], skip: list[str] | None = None) -> dict[str, Any]:
     """Expand a workflow template into a concrete plan (a small DAG)."""
     workflow = WORKFLOWS[intent]
     skip_set = {k for k in (skip or []) if any(s.key == k and s.optional for s in workflow.steps)}
-    values = _Blank({k: v for k, v in params.items() if v})
+    values = {k: str(v).strip() for k, v in params.items() if str(v or "").strip().lower() not in _EMPTY}
     steps = []
     for st in workflow.steps:
         if st.key in skip_set:
@@ -384,7 +401,7 @@ def instantiate(intent: str, params: dict[str, str], skip: list[str] | None = No
             {
                 "key": st.key,
                 "agent": st.agent,
-                "task": st.task.format_map(values),
+                "task": fill(st.task, values),
                 "depends_on": [d for d in st.depends_on if d not in skip_set],
             }
         )

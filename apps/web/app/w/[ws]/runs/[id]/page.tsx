@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { ArtifactView } from "@/components/artifact-view";
 import { InsightCard } from "@/components/insight-card";
+import { Markdown } from "@/components/markdown";
 import { canEdit, useWorkspace } from "@/components/session";
 import { AGENTS, AgentAvatar, Badge, Button, Card, CodeBlock, cx, ErrorBanner, RunStatusBadge, SectionTitle, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -67,7 +68,7 @@ function Timeline({ run, onShow }: { run: RunDetail; onShow: (id: string) => voi
                     <StepIcon status={step.status} />
                   </div>
                   <p className="text-sm text-ink-2">{step.task}</p>
-                  {step.summary && <p className="rounded-lg bg-surface-2 px-3 py-2 text-sm break-words">{step.summary}</p>}
+                  {step.summary && <Markdown className="rounded-lg bg-surface-2 px-3 py-2 text-sm">{step.summary}</Markdown>}
                   {step.error && <p className="text-sm text-bad">{step.error}</p>}
                   {calls.length > 0 && (
                     <ul className="space-y-1.5">
@@ -100,7 +101,7 @@ function PlanPanel({ run, editable, onAct }: { run: RunDetail; editable: boolean
         <h2 className="font-semibold">Proposed plan: {plan.title}</h2>
         <Badge>{titleCase(plan.confidence)} confidence</Badge>
       </div>
-      {plan.rationale && <p className="mt-1 text-sm text-ink-2">{plan.rationale}</p>}
+      {plan.rationale && <Markdown className="mt-1 text-sm text-ink-2">{plan.rationale}</Markdown>}
       {Object.keys(plan.params).length > 0 && (
         <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
           {Object.entries(plan.params).map(([k, v]) => (
