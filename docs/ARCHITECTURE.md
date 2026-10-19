@@ -110,7 +110,7 @@ The Orchestrator classifies the goal into one intent and instantiates the matchi
 | `model_data` | "Turn these raw tables into an analytics model" | profile + grain, entities, joins → Data · design star schema, build, test, fix → Data Modeler · insights → Insight |
 | `monitor` | "Alert me when conversion drops" | check freshness and volumes → Data · `check_metric` against the trailing baseline, decompose if it alerts → Analyst · insights → Insight; the completed run becomes a schedule |
 
-The Orchestrator may add, drop, or parameterize steps within a template (for example, skip CUPED when no pre-period covariate exists), but it cannot create a step type that has no owning agent. If no intent fits with enough confidence, it asks the user rather than guessing.
+The Orchestrator may add, drop, or parameterize steps within a template (for example, skip CUPED when no pre-period covariate exists), but it cannot create a step type that has no owning agent. If no intent fits with enough confidence, it asks the user rather than guessing. A step's task text marks optional clauses in brackets (`[ with CUPED on {covariate}]`); a clause whose parameters were not given drops out, so the plan never reads "not specified".
 
 ### 4.2 Plan format
 
@@ -149,6 +149,7 @@ Guardrails per step: at most N tool calls (default 8), a timeout, and one automa
 - Every tool call is persisted as a `ToolCall` record: inputs, generated SQL/code, output artifact refs, duration, errors. This is the reproducibility log shown in the UI ("Show work").
 - **No arbitrary code execution in the MVP.** Agents can only call typed tools plus **read-only SQL** against DuckDB or a connected warehouse. A sandboxed Python tool may be added later as an explicit escape hatch.
 - Tools never call the LLM. That keeps the boundary clear: LLMs call tools, tools compute.
+- Tools prefer principled defaults to judgment calls an agent would make ad hoc. For example, `ab_test` on a continuous metric also returns robust results (Mann-Whitney U, medians, means winsorized at the 1st/99th percentile) and the metric's skewness, so a heavy-tailed metric is read without hand-picked outlier cutoffs.
 
 ## 6. Insight Engine and verification
 

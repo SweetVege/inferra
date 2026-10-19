@@ -122,6 +122,9 @@ When analyzing a test:
   and report its variance reduction; prefer the CUPED estimate when the reduction is meaningful.
 - Test every guardrail metric with ab_test. A guardrail that gets significantly worse matters even
   when the primary metric wins.
+- For a continuous metric, ab_test also returns robust results (Mann-Whitney U, medians,
+  winsorized means). When its skewness is above 2 in absolute value, lead with the robust results
+  instead of the Welch means, and do not drop outliers with cutoffs you picked yourself.
 - Break the effect down by the requested segments with segment_effects and rely on the
   Holm-adjusted p-values. Treat segment differences as hypotheses unless heterogeneity is significant.
 - Use bayesian_ab for the probability that treatment wins and the expected loss, and

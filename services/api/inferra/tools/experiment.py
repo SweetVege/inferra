@@ -234,6 +234,87 @@ def _pick(arms: dict[str, Arm], control: str, treatment: str | None) -> tuple[Ar
     return arms[control], others
 
 
+def _literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def robust_compare(
+    source: DataSource,
+    table: str,
+    variant_col: str,
+    expr: str,
+    where: str | None,
+    control: str,
+    treatment: str,
+    alpha: float,
+) -> dict[str, Any]:
+    """Outlier-resistant comparison for a continuous metric, computed in the database.
+
+    Mann-Whitney U (normal approximation with the tie correction) compares whole distributions;
+    the 1%/99% winsorized means keep every unit but cap extreme values, so a handful of whales or
+    bots cannot decide the result. Skewness says when these should be preferred over Welch."""
+    q = source.quote
+    arms = f"CAST({q(variant_col)} AS VARCHAR) IN ({_literal(control)}, {_literal(treatment)})"
+    base = (
+        f"SELECT CAST({q(variant_col)} AS VARCHAR) AS v, CAST(m AS DOUBLE) AS m "
+        f"FROM (SELECT *, {expr} AS m FROM {q(table)}) {_where(where, f'{arms} AND m IS NOT NULL')}"
+    )
+    sql = (
+        f"WITH base AS ({base}), "
+        "bounds AS (SELECT quantile_cont(m, 0.01) AS lo, quantile_cont(m, 0.99) AS hi, "
+        "skewness(m) AS skew FROM base), "
+        "ranked AS (SELECT v, m, rank() OVER (ORDER BY m) + (count(*) OVER (PARTITION BY m) - 1) / 2.0 AS r "
+        "FROM base) "
+        "SELECT v, count(*) AS n, median(m) AS median, sum(r) AS rank_sum, "
+        "avg(least(greatest(m, lo), hi)) AS w_mean, "
+        "coalesce(var_samp(least(greatest(m, lo), hi)), 0) AS w_var, "
+        "any_value(lo) AS lo, any_value(hi) AS hi, any_value(skew) AS skew "
+        "FROM ranked, bounds GROUP BY v"
+    )
+    ties_sql = (
+        f"WITH base AS ({base}) SELECT coalesce(sum(c * c * c - c), 0) AS t "
+        "FROM (SELECT count(*)::DOUBLE AS c FROM base GROUP BY m)"
+    )
+    try:
+        rows = {r["v"]: r for r in source.query(sql).rows}
+        ties = float(source.query(ties_sql).rows[0]["t"])
+    except QueryError as exc:
+        raise ToolError(str(exc)) from exc
+    if control not in rows or treatment not in rows:
+        raise ToolError("Both arms need values to compare.")
+    c, t = rows[control], rows[treatment]
+    n1, n2 = int(c["n"]), int(t["n"])
+    big_n = n1 + n2
+    u_treatment = float(t["rank_sum"]) - n2 * (n2 + 1) / 2
+    sigma = math.sqrt(n1 * n2 / 12 * ((big_n + 1) - ties / (big_n * (big_n - 1)))) if big_n > 1 else 0.0
+    z = (u_treatment - n1 * n2 / 2) / sigma if sigma > 0 else 0.0
+    skew = None if c["skew"] is None else float(c["skew"])
+    winsorized = compare(
+        Arm(control, n1, float(c["w_mean"]), float(c["w_var"])),
+        Arm(treatment, n2, float(t["w_mean"]), float(t["w_var"])),
+        "continuous",
+        alpha,
+    )
+    return {
+        "method": (
+            "Mann-Whitney U (tie-corrected normal approximation); means winsorized at the 1st/99th percentile"
+        ),
+        "skewness": skew if skew is not None and math.isfinite(skew) else None,  # NaN for a constant metric
+        "median_control": c["median"],
+        "median_treatment": t["median"],
+        "mann_whitney_p_value": float(2 * stats.norm.sf(abs(z))),
+        "prob_treatment_higher": u_treatment / (n1 * n2),  # P(random treatment unit > control unit)
+        "winsorize_low": c["lo"],
+        "winsorize_high": c["hi"],
+        "winsorized_mean_control": winsorized["mean_control"],
+        "winsorized_mean_treatment": winsorized["mean_treatment"],
+        "winsorized_diff": winsorized["diff"],
+        "winsorized_diff_ci_low": winsorized["diff_ci_low"],
+        "winsorized_diff_ci_high": winsorized["diff_ci_high"],
+        "winsorized_p_value": winsorized["p_value"],
+    }
+
+
 def _assignment_counts(source: DataSource, table: str, variant_col: str, where: str | None) -> dict[str, int]:
     q = source.quote
     rows = source.query(
@@ -437,7 +518,11 @@ def _experiment_data(
     "ab_test",
     "Frequentist A/B test of one metric: per-arm means, absolute difference and relative lift with "
     "confidence intervals, and p-values (z-test for binary metrics, Welch's t-test otherwise; Holm "
-    "correction across several treatments). Includes the SRM check. Creates an 'ab_test' artifact.",
+    "correction across several treatments). For continuous metrics each comparison also has 'robust' "
+    "results: medians, a Mann-Whitney U test, and 1%/99% winsorized means with an interval. When "
+    "skewness is large (|skew| > 2, e.g. revenue or activity counts), rely on the robust results "
+    "instead of dropping outliers with a hand-picked cutoff. Includes the SRM check. Creates an "
+    "'ab_test' artifact.",
     AbTestInput,
 )
 def ab_test(ctx: ToolContext, args: AbTestInput) -> ToolOutput:
@@ -451,14 +536,25 @@ def ab_test(ctx: ToolContext, args: AbTestInput) -> ToolOutput:
     for c, p in zip(comparisons, holm([c["p_value"] for c in comparisons]), strict=True):
         c["p_value_adjusted"] = p
         c["significant"] = p < args.alpha
+        if metric_type == "continuous":
+            c["robust"] = robust_compare(
+                src,
+                args.table,
+                args.variant_column,
+                expr,
+                args.where,
+                control.variant,
+                c["treatment"],
+                args.alpha,
+            )
     expected = {s.variant: s.share for s in args.expected_shares} if args.expected_shares else None
     srm_result = srm(_assignment_counts(src, args.table, args.variant_column, args.where), expected)
     data = round_floats(_experiment_data(args, metric_type, arms, comparisons, srm_result), 8)
-    return ToolOutput(
-        result=data,
-        artifact=ArtifactDraft("ab_test", f"A/B test: {args.metric_column}", data),
-        code=sql,
-    )
+    data["where"] = args.where
+    title = f"A/B test: {args.metric_column}"
+    if args.where:
+        title += f" where {args.where if len(args.where) <= 60 else args.where[:57] + '...'}"
+    return ToolOutput(result=data, artifact=ArtifactDraft("ab_test", title, data), code=sql)
 
 
 class CupedInput(BaseModel):

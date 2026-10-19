@@ -266,3 +266,42 @@ def test_unknown_variant_is_a_helpful_error(checkout) -> None:  # type: ignore[n
     ctx, _ = checkout
     with pytest.raises(ToolError, match="Variants: control, treatment"):
         run(ctx, "ab_test", variant_column="variant", control="A", metric_column="converted")
+
+
+def test_robust_results_resist_heavy_tails(tmp_path: Path) -> None:
+    rng = np.random.default_rng(7)
+    n = 4000
+    frame = pd.DataFrame({"variant": np.repeat(["control", "treatment"], n)})
+    # Integer-valued and heavy-tailed, like game rounds: plenty of ties, a long right tail.
+    frame["rounds"] = np.floor(rng.lognormal(3.0, 1.2, 2 * n)) + (frame.variant == "treatment") * 2
+    frame.loc[0, "rounds"] = 50_000  # one extreme control unit
+    artifact = (
+        get_tool("ab_test")
+        .run(
+            source_for(frame, tmp_path),
+            {
+                "table": "exp",
+                "variant_column": "variant",
+                "control": "control",
+                "metric_column": "rounds",
+                "where": "rounds >= 0",
+            },
+        )
+        .artifact
+    )
+    assert artifact.title == "A/B test: rounds where rounds >= 0"
+    data = artifact.data
+    robust = data["comparisons"][0]["robust"]
+    c_vals, t_vals = (frame[frame.variant == v].rounds for v in ("control", "treatment"))
+    ref = stats.mannwhitneyu(
+        t_vals, c_vals, alternative="two-sided", method="asymptotic", use_continuity=False
+    )
+    assert robust["mann_whitney_p_value"] == pytest.approx(ref.pvalue, rel=1e-6)
+    assert robust["prob_treatment_higher"] == pytest.approx(ref.statistic / (n * n), rel=1e-6)
+    assert robust["median_control"] == pytest.approx(c_vals.median())
+    assert robust["skewness"] > 2
+    lo, hi = np.quantile(frame.rounds, [0.01, 0.99])
+    assert robust["winsorized_mean_control"] == pytest.approx(c_vals.clip(lo, hi).mean(), rel=1e-6)
+    # The single outlier drags the raw control mean up; the winsorized difference still sees the lift.
+    assert data["comparisons"][0]["diff"] < robust["winsorized_diff"]
+    assert robust["winsorized_diff_ci_low"] < robust["winsorized_diff"] < robust["winsorized_diff_ci_high"]
