@@ -471,6 +471,7 @@ def test_a_range_shares_its_unit() -> None:
     for claim in [
         "The difference was -0.82 pp (95% CI -1.33 to -0.31 pp).",
         "The difference was -0.82% (95% CI -1.33–-0.31%).",
+        "The difference was -0.82 percentage points (95% CI -1.33 to -0.31 percent).",
     ]:
         v = verify_insight(draft(claim, evidence), artifacts)
         assert check(v, "number_grounding").passed, (claim, v.failures())
