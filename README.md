@@ -33,6 +33,7 @@ Public Kaggle datasets, run on the live deployment with a real model and reviewe
 | Case | Question | Result |
 |---|---|---|
 | [Cookie Cats](https://inferra-demo.vercel.app/r/pHet7uCTv6eOYl5ZHNrBFnm0bllHxzYJ) (mobile game A/B test, 90,189 players) | Should the first gate move from level 30 to level 40? | No: 7-day retention fell by 0.82 percentage points (p=0.0016), with no offsetting gain in 1-day retention or engagement. Matches the published analyses of this dataset. |
+| [Telco Customer Churn](https://inferra-demo.vercel.app/r/NNSOi5qdxdWFu_4rLa3LtNtN3PKilNKj) (7,043 customers) | Who churns, and do longer contracts help? | A churn model ranks customers well on held-out data (AUC 0.848; contract type, tenure, and internet and security services drive it). Two-year customers churn far less than month-to-month ones even after adjusting for tenure and charges (odds ratio 0.158), reported as an association, with the adjustment's caveats, not as an effect of the contract. |
 
 ## Status
 
