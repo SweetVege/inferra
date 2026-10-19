@@ -28,7 +28,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/PRD.md
 
 ## On real data
 
-Public Kaggle datasets, run on the live deployment with a real model and reviewed by a person before publishing.
+Public Kaggle datasets, run on the live deployment with a real model and reviewed by a person before publishing. [docs/EVALUATION.md](docs/EVALUATION.md) has the method, every question's result against published analyses, the fixes the evaluation drove, and what is still unsolved.
 
 | Case | Question | Result |
 |---|---|---|
