@@ -84,6 +84,57 @@ def run_sql(ctx: ToolContext, args: RunSqlInput) -> ToolOutput:
     )
 
 
+class CreateViewInput(BaseModel):
+    name: str = Field(description="Lowercase name for the view, e.g. orders_with_reviews.")
+    sql: str = Field(
+        description="One read-only DuckDB SELECT; it may join any of the run's tables and views."
+    )
+    description: str = Field(
+        description="What one row is and how it was built, e.g. 'One delivered order...'."
+    )
+
+
+VIEW_PREVIEW_ROWS = 20
+
+
+@tool(
+    "create_view",
+    "Name one SELECT (joins across the run's tables allowed) as a view that every tool in this run, "
+    "and later steps, can then use like a table: fit a regression, match, or train a model on joined "
+    "data. Build it at the grain the analysis needs (for example one row per order, aggregating "
+    "item rows first) so nothing is counted twice. Creates a 'table' artifact with a preview.",
+    CreateViewInput,
+)
+def create_view(ctx: ToolContext, args: CreateViewInput) -> ToolOutput:
+    add_view = getattr(ctx.source, "add_view", None)
+    if add_view is None:
+        raise ToolError("This data source does not support views.")
+    try:
+        info = add_view(args.name, args.sql, args.description)
+        preview = ctx.source.query(f"SELECT * FROM {ctx.source.quote(info.name)}", limit=VIEW_PREVIEW_ROWS)
+    except QueryError as exc:
+        raise ToolError(str(exc)) from exc
+    data = round_floats(
+        {
+            "view": info.name,
+            "description": info.description,
+            "sql": args.sql,
+            "total_rows": info.row_count,
+            "columns": preview.columns,
+            "rows": preview.rows,
+            "row_count": len(preview.rows),
+            "truncated": preview.truncated,
+        }
+    )
+    result = {k: v for k, v in data.items() if k not in {"rows", "row_count", "truncated"}}
+    result["column_types"] = info.columns
+    return ToolOutput(
+        result=result,
+        artifact=ArtifactDraft(kind="table", title=f"View: {info.name}", data=data),
+        code=args.sql,
+    )
+
+
 class SummarizeColumnInput(BaseModel):
     table: str
     column: str
