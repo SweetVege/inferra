@@ -59,7 +59,12 @@ def convert_to_parquet(source: Path, dest: Path) -> tuple[int, list[dict[str, st
         if ext in {".xlsx", ".xls"}:
             import pandas as pd
 
-            frame = pd.read_excel(source)
+            try:
+                frame = pd.read_excel(source)
+            except Exception as exc:  # corrupt, password-protected, or not really Excel
+                raise QueryError(
+                    f"Could not read the spreadsheet ({exc}). Save it as CSV or .xlsx and upload again."
+                ) from exc
             frame.columns = [str(c) for c in frame.columns]
             con.register("upload", frame)
             relation = "upload"

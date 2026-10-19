@@ -95,3 +95,20 @@ def test_direct_upload_checks(client: TestClient, s3, monkeypatch: pytest.Monkey
     login(client, "ada")
     res = client.post(f"{start}/{ticket['upload_id']}/complete", json={"filename": "a.csv"})
     assert res.status_code == 413
+
+
+def test_legacy_excel_and_unreadable_spreadsheets(client: TestClient, tmp_path: Path) -> None:
+    ws = login(client)
+    fixture = Path(__file__).parent / "fixtures" / "legacy.xls"
+    with fixture.open("rb") as fh:
+        res = client.post(f"/api/workspaces/{ws}/datasets", files={"file": ("telco.xls", fh)})
+    assert res.status_code == 201, res.text
+    assert res.json()["row_count"] == 3
+    assert [c["name"] for c in res.json()["columns"]] == ["customerID", "tenure", "Churn"]
+
+    # A file that only claims to be Excel gets a reason, not a server error.
+    fake = tmp_path / "export.xls"
+    fake.write_text("customerID,tenure\na,1\n")
+    with fake.open("rb") as fh:
+        res = client.post(f"/api/workspaces/{ws}/datasets", files={"file": ("export.xls", fh)})
+    assert res.status_code == 400 and "Save it as CSV" in res.json()["detail"]

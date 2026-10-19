@@ -20,6 +20,7 @@ dependencies = [
   "numpy>=2.1",
   "scipy>=1.14",
   "openpyxl>=3.1",
+  "xlrd>=2.0",
   "boto3>=1.35",
   "anthropic>=1.15",
   "statsmodels>=0.15.0",
