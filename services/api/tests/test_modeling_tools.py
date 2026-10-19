@@ -1,6 +1,7 @@
 """Modeling tools checked against reference implementations and synthetic data with known answers."""
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -256,3 +257,14 @@ def test_regression_models(tmp_path: Path) -> None:
     assert data["task"] == "regression"
     assert data["holdout"]["rmse"] < data["naive"]["rmse"]
     assert data["cv"]["metric"] == "rmse"
+
+
+def test_lightgbm_threads_follow_the_container_cpu_quota(tmp_path: Path) -> None:
+    from inferra.tools.ml import _cpu_threads
+
+    quota = tmp_path / "cpu.max"
+    quota.write_text("10000 100000\n")  # a 0.1-CPU instance
+    assert _cpu_threads(cpu_max=str(quota)) == 1
+    quota.write_text("max 100000\n")
+    assert _cpu_threads(cpu_max=str(quota)) == min(2, len(os.sched_getaffinity(0)))
+    assert _cpu_threads(cpu_max=str(tmp_path / "missing")) >= 1

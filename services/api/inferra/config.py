@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     llm_effort_specialist: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     llm_effort_insight: Literal["low", "medium", "high", "xhigh", "max"] = "high"
     llm_max_tokens: int = 16000
+    # A model request that sends nothing for this long fails (then is retried once) instead of
+    # leaving a run spinning.
+    llm_timeout_seconds: int = 120
 
     # Who may start agent runs, which spend the deployment's model budget. The allowlist is a
     # comma-separated list of logins (empty: everyone signed in); the limit counts runs per person
@@ -52,6 +55,8 @@ class Settings(BaseSettings):
     # Runtime guardrails.
     inline_worker: bool = True
     max_tool_calls_per_step: int = 8
+    # A step still working after this long stops with the reason, rather than waiting for recovery.
+    step_time_limit_minutes: int = 8
     max_insight_revisions: int = 2
     max_upload_mb: int = 50
     # A planning or running run with no progress for this long was interrupted (e.g. a restart).

@@ -480,3 +480,22 @@ def test_modeling_runs_end_to_end(client: TestClient, file: str, goal: str, inte
     assert run["insights"] and all(i["verified"] for i in run["insights"]), [
         i["checks"] for i in run["insights"]
     ]
+
+
+def test_a_step_past_its_time_limit_fails_with_the_reason(
+    client: TestClient, orders_csv: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from inferra.config import get_settings
+
+    monkeypatch.setenv("INFERRA_STEP_TIME_LIMIT_MINUTES", "0")
+    get_settings.cache_clear()
+    ws = login(client)
+    upload(client, ws, orders_csv)
+    use_llm(demo_script)
+    client.patch(f"/api/workspaces/{ws}", json={"auto_approve_plans": True})
+    run = client.post(f"/api/workspaces/{ws}/runs", json={"goal": "Give me an overview of my orders"}).json()
+    drain()
+    run = client.get(f"/api/workspaces/{ws}/runs/{run['id']}").json()
+    assert run["status"] == "failed"
+    assert run["error"] == "Data Agent stopped after 0 minutes (before calling any tool)."
+    assert run["steps"][0]["error"] == run["error"]

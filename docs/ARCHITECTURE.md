@@ -141,7 +141,7 @@ StepResult = { status: ok | failed | needs_input,
                tool_calls[] }        // ids into the tool-call log
 ```
 
-Guardrails per step: at most N tool calls (default 8), a timeout, and one automatic retry. On failure the Orchestrator either re-plans the remaining steps once or stops and reports what failed.
+Guardrails per step: at most N tool calls (default 8) and a time limit (`INFERRA_STEP_TIME_LIMIT_MINUTES`, default 8); a model request that sends nothing for `INFERRA_LLM_TIMEOUT_SECONDS` (default 120) fails and is retried once. A step that hits a limit stops with a reason that names what it was doing, and the run page shows the tool a running step is in, or that it is waiting for the model, with the time elapsed. On failure the Orchestrator either re-plans the remaining steps once or stops and reports what failed.
 
 ## 5. Tool layer
 

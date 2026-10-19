@@ -89,3 +89,21 @@ def test_retry_rules(client: TestClient, orders_csv: Path, monkeypatch: pytest.M
     monkeypatch.setenv("INFERRA_DAILY_RUN_LIMIT", "2")
     get_settings.cache_clear()
     assert client.post(f"/api/workspaces/{ws}/runs/{run_id}/retry").status_code == 429
+
+
+def test_a_silent_model_request_times_out_with_a_clear_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    import anthropic
+    import httpx
+
+    from inferra.llm.gateway import AnthropicLLM, LLMUnavailable
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    llm = AnthropicLLM("claude-test")
+    assert llm._client.timeout == 120 and llm._client.max_retries == 1
+
+    def stalled(**_: object) -> None:
+        raise anthropic.APITimeoutError(request=httpx.Request("POST", "https://api.anthropic.com"))
+
+    monkeypatch.setattr(llm._client.beta.messages, "stream", stalled)
+    with pytest.raises(LLMUnavailable, match="did not respond within 120 seconds"):
+        llm.create(role="specialist", system="", tools=[], messages=[])
