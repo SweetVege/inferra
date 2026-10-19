@@ -238,6 +238,11 @@ Statistical and ML tools read one table, so agents join tables first with `creat
 validated SELECT, named for the rest of the run and listed in later steps' briefs. Views are created
 inside the same sandbox, after its settings are locked, and live only as long as the run's source.
 
+Every DuckDB connection is capped to the container: threads from the cgroup CPU quota, memory to a
+share of the cgroup memory limit (`INFERRA_DUCKDB_MEMORY_MB` overrides it). Without the cap DuckDB
+sizes itself to the host's RAM, and one large join could take a 512 MB instance down; with it, that
+query fails on its own with an out-of-memory error the agent can read.
+
 | Source | Phase | How it works |
 |---|---|---|
 | File upload | MVP | CSV/TSV/Parquet/Excel normalized to Parquet in object storage. With S3 storage the browser uploads to a presigned URL and the API ingests from the bucket, so large files skip the web proxy; otherwise (or without bucket CORS) a multipart upload |

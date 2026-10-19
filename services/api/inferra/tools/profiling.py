@@ -47,7 +47,10 @@ def _table(source: DataSource, name: str) -> Any:
         if info.name == name:
             return info
     known = ", ".join(t.name for t in source.list_tables()) or "none"
-    raise ToolError(f"Unknown table '{name}'. Available tables: {known}.")
+    raise ToolError(
+        f"Unknown table '{name}'. Available tables: {known}. Tools take a table name, not SQL: to use "
+        "a join or a derived column, define it first with create_view and pass the view's name."
+    )
 
 
 def _one(source: DataSource, sql: str) -> dict[str, Any]:

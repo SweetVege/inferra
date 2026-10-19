@@ -271,14 +271,14 @@ def test_a_model_no_better_than_the_mean_is_flagged(tmp_path: Path) -> None:
 
 
 def test_lightgbm_threads_follow_the_container_cpu_quota(tmp_path: Path) -> None:
-    from inferra.tools.ml import _cpu_threads
+    from inferra.resources import cpu_threads
 
     quota = tmp_path / "cpu.max"
     quota.write_text("10000 100000\n")  # a 0.1-CPU instance
-    assert _cpu_threads(cpu_max=str(quota)) == 1
+    assert cpu_threads(cpu_max=str(quota)) == 1
     quota.write_text("max 100000\n")
-    assert _cpu_threads(cpu_max=str(quota)) == min(2, len(os.sched_getaffinity(0)))
-    assert _cpu_threads(cpu_max=str(tmp_path / "missing")) >= 1
+    assert cpu_threads(cpu_max=str(quota)) == min(2, len(os.sched_getaffinity(0)))
+    assert cpu_threads(cpu_max=str(tmp_path / "missing")) >= 1
 
 
 def test_grouped_validation_holds_out_whole_groups(tmp_path: Path) -> None:
@@ -350,6 +350,9 @@ def test_a_view_joins_tables_so_single_table_tools_can_use_them(tmp_path: Path) 
     )
     assert out.result["total_rows"] == n and out.artifact.kind == "table"
     assert "order_reviews" in {t.name for t in ctx.source.list_tables()}
+    # Passing SQL where a table name goes points the agent to the view tool.
+    with pytest.raises(ToolError, match="create_view"):
+        get_tool("fit_regression").run(ctx, {"table": f"({sql})", "target": "score", "features": ["late"]})
 
     fit = (
         get_tool("fit_regression")
