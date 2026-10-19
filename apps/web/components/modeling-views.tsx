@@ -223,7 +223,7 @@ export function ModelView({ d }: { d: Row }) {
             <Stat label="MAE" value={formatNumber(h.mae)} />
           </>
         )}
-        <Stat label={`5-fold CV ${String(cv.metric).toUpperCase()}`} value={formatNumber(cv.mean, 3)} hint={`± ${formatNumber(cv.std, 3)}`} />
+        <Stat label={`${Array.isArray(cv.folds) ? cv.folds.length : 5}-fold CV ${String(cv.metric).toUpperCase()}`} value={formatNumber(cv.mean, 3)} hint={`± ${formatNumber(cv.std, 3)}`} />
       </dl>
       <div className="grid gap-5 md:grid-cols-2">
         <div className="space-y-2">

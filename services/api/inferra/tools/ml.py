@@ -27,6 +27,13 @@ from inferra.tools.modeling import fetch, to_numeric
 from inferra.tools.profiling import _table, column_kind
 
 MAX_TRAIN_ROWS = 100_000
+LARGE_TRAIN_ROWS = 40_000  # above this, three folds estimate the score as well as five, at 60% of the cost
+
+
+def n_folds(train_rows: int) -> int:
+    return 3 if train_rows > LARGE_TRAIN_ROWS else 5
+
+
 MAX_CATEGORY_LEVELS = 50
 SEED = 42
 GBM_PARAMS = {
@@ -263,9 +270,10 @@ def _screen(
     "train_model",
     "Train and evaluate a predictive model for a binary or numeric target. Screens features (drops "
     "dates, identifiers, and likely target leakage), trains a gradient-boosted tree model and a linear "
-    "baseline, reports 5-fold cross-validation and held-out test metrics against the baseline and a naive "
-    "predictor (split at random, or by whole groups with group_column), explains predictions with SHAP "
-    "values, writes a model card, and registers the model for batch scoring. Creates a 'model' artifact.",
+    "baseline, reports cross-validation (5 folds, 3 above 40,000 rows) and held-out test metrics "
+    "against the baseline and a naive predictor (split at random, or by whole groups with "
+    "group_column), explains predictions with SHAP values, writes a model card, and registers the "
+    "model for batch scoring. Creates a 'model' artifact.",
     TrainInput,
 )
 def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
@@ -327,22 +335,25 @@ def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
                 "The held-out groups contain only one class; grouped validation cannot score them."
             )
         grouped_folds = (
-            StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=SEED)
+            StratifiedGroupKFold(n_splits=n_folds(len(tr_idx)), shuffle=True, random_state=SEED)
             if classification
-            else GroupKFold(n_splits=5)
+            else GroupKFold(n_splits=n_folds(len(tr_idx)))
         )
         splits = list(grouped_folds.split(X_train, y_train, g_train))
     else:
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=args.test_size, random_state=SEED, stratify=y if classification else None
         )
-        folds = (StratifiedKFold if classification else KFold)(n_splits=5, shuffle=True, random_state=SEED)
+        k = n_folds(len(y_train))
+        folds = (StratifiedKFold if classification else KFold)(n_splits=k, shuffle=True, random_state=SEED)
         splits = list(folds.split(X_train, y_train))
         g_train = None
     params = {**GBM_PARAMS, "objective": "binary" if classification else "regression"}
 
-    def fit(Xf: np.ndarray, yf: np.ndarray, gf: np.ndarray | None = None) -> Any:
-        """Pick the number of rounds by early stopping on an inner validation split, then refit."""
+    def fit(Xf: np.ndarray, yf: np.ndarray, gf: np.ndarray | None = None, refit: bool = True) -> Any:
+        """Pick the number of rounds by early stopping on an inner validation split, then refit on all
+        of Xf. Cross-validation folds skip the refit: the early-stopped model scores a fold just as
+        honestly, and on a 0.1-CPU instance the refits doubled the training time."""
         if gf is None:
             X_fit, X_val, y_fit, y_val = train_test_split(
                 Xf, yf, test_size=0.2, random_state=SEED, stratify=yf if classification else None
@@ -359,6 +370,8 @@ def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
             valid_sets=[val],
             callbacks=[lgb.early_stopping(EARLY_STOP, verbose=False)],
         )
+        if not refit:
+            return probe  # predict() uses its best iteration
         rounds = max(20, probe.best_iteration or MAX_ROUNDS)
         full = lgb.Dataset(Xf, yf, feature_name=names, categorical_feature=cat_idx, free_raw_data=False)
         return lgb.train(params, full, num_boost_round=rounds)
@@ -369,7 +382,9 @@ def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
     for tr, va in splits:
         fold_groups = g_train[tr] if g_train is not None else None
         tree_cv.append(
-            score(y_train[va], fit(X_train[tr], y_train[tr], fold_groups).predict(X_train[va]))[headline]
+            score(y_train[va], fit(X_train[tr], y_train[tr], fold_groups, refit=False).predict(X_train[va]))[
+                headline
+            ]
         )
         fold_linear = fit_linear(X_train[tr], y_train[tr], spec, classification)
         linear_cv.append(score(y_train[va], linear_predict(X_train[va], fold_linear))[headline])
