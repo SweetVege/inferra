@@ -61,3 +61,36 @@ def delete_file(key: str) -> None:
     s = get_settings()
     if s.storage_backend == "s3":
         _s3_client().delete_object(Bucket=s.s3_bucket, Key=key)
+
+
+def direct_uploads() -> bool:
+    """Browsers can upload straight to the bucket (presigned PUT), bypassing the web proxy."""
+    return get_settings().storage_backend == "s3"
+
+
+def presigned_put(key: str, expires: int = 900) -> str:
+    s = get_settings()
+    return _s3_client().generate_presigned_url(
+        "put_object", Params={"Bucket": s.s3_bucket, "Key": key}, ExpiresIn=expires
+    )
+
+
+def object_size(key: str) -> int | None:
+    """Size of an object in the bucket, or None when it does not exist."""
+    s = get_settings()
+    try:
+        return int(_s3_client().head_object(Bucket=s.s3_bucket, Key=key)["ContentLength"])
+    except Exception:
+        return None
+
+
+def download_to(key: str, dest: Path) -> None:
+    s = get_settings()
+    _s3_client().download_file(s.s3_bucket, key, str(dest))
+
+
+def delete_object(key: str) -> None:
+    """Remove a bucket object that has no local cache copy (e.g. a finished direct upload)."""
+    s = get_settings()
+    if s.storage_backend == "s3":
+        _s3_client().delete_object(Bucket=s.s3_bucket, Key=key)

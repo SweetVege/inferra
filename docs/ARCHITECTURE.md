@@ -64,6 +64,7 @@ Plus one **non-LLM component**, the **Verifier**, which checks every drafted ins
 
 - Each specialist maps to a real job function (data engineer, analyst, experimentation scientist, ML engineer, and a lead who communicates findings), so the product story and the code structure match.
 - Splitting by tool domain keeps each agent's tool list short (under ~12), which improves tool-selection accuracy and keeps prompts focused.
+- Dataset catalogs in prompts list at most 40 columns per table, those sharing a word with the goal first; `list_tables` with a table and a search word finds the rest. Public datasets with hundreds of columns would otherwise crowd the prompt and dilute the plan.
 - The Insight Agent is separate from the agents that produce results, so the one that writes the conclusion is not the one that ran the numbers. Together with the Verifier, this gives a built-in critic.
 
 ## 4. From natural language to a workflow
@@ -232,7 +233,7 @@ see where data came from.
 
 | Source | Phase | How it works |
 |---|---|---|
-| File upload | MVP | CSV/TSV/Parquet/Excel normalized to Parquet in object storage |
+| File upload | MVP | CSV/TSV/Parquet/Excel normalized to Parquet in object storage. With S3 storage the browser uploads to a presigned URL and the API ingests from the bucket, so large files skip the web proxy; otherwise (or without bucket CORS) a multipart upload |
 | Postgres | Phase 3 | **Extracts.** A connection (password encrypted with a key derived from the app secret) pulls a table or a custom query into Parquet. Sessions are read-only (`default_transaction_read_only`) with a statement timeout; custom SQL runs as a subquery on a server-side cursor, which accepts exactly one SELECT. Private and loopback hosts are refused in production. Extracts refresh on demand. |
 | BigQuery | Phase 4 | **Extracts** through a service account. Every query is dry-run first: it must be a SELECT, and the bytes it would scan must fit the connection's budget, which is also set as `maximum_bytes_billed` on the real job. |
 | Snowflake | Phase 4 | **Extracts** with a password or key pair. Snowflake has no read-only session flag, so the connection should use a read-only role; on top of that custom SQL is wrapped as a subquery (rejecting DDL and DML), one statement per call, with a two-minute timeout. |
@@ -316,6 +317,7 @@ erDiagram
 ## 9. Runtime and operations
 
 - **Schedules.** The worker loop also enqueues due scheduled re-runs (see §6), so production needs no separate cron.
+- **Interrupted runs.** A restart, deploy, or a sleeping free-tier instance can stop a worker mid-run. On every tick the worker fails runs in `planning` or `running` that have made no progress for `INFERRA_RUN_STALL_MINUTES` (default 20; every model call and step counts as progress) and have no job still waiting in the queue. A late worker for such a run stops at its next step. People retry a failed run in one click: the approved plan is reused, or planning starts again if it failed there.
 - **Jobs.** Planning and execution run as background jobs on a Postgres-backed queue (`SELECT … FOR UPDATE SKIP LOCKED`, no Redis). In development the API process runs the worker in a thread; in production it can run as a separate `python -m inferra.worker` process. While a run is active the UI polls its state; the append-only `run_events` table drives the activity timeline.
 - **LLM gateway.** One module (`llm/gateway.py`) wraps the Claude API: the model comes from `INFERRA_LLM_MODEL`, effort is set per role (planning, specialist, insight), requests stream, prompts are cached, refusals fall back server-side, and token usage is accumulated per run. Agents depend on a small `LLMClient` protocol, so tests and the demo seed use a scripted client that drives the exact same pipeline. Per-workspace budgets are planned.
 - **Auth.** GitHub OAuth plus a read-only demo workspace with seeded datasets and completed runs.
@@ -334,7 +336,7 @@ inferra/
 │  │  ├─ auth/                # GitHub OAuth, signed-cookie sessions, workspace roles
 │  │  ├─ agents/              # orchestrator.py, specialist.py (Data, Analyst, Experiment, ML, Modeler), insight.py, prompts.py
 │  │  ├─ workflows/           # intent templates
-│  │  ├─ runtime/             # job queue, run executor, scheduler and alerts, recorder (tool calls, artifacts, events)
+│  │  ├─ runtime/             # job queue, run executor, scheduler and alerts, quota, recovery, recorder
 │  │  ├─ tools/               # typed tools: profiling, SQL, metrics, experiments, modeling, ml, datamodel
 │  │  ├─ transform/           # data models: compile, build + tests, star-schema design, dbt export
 │  │  ├─ metrics_layer.py     # metric definitions -> tool specs

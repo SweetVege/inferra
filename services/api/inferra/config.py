@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     max_tool_calls_per_step: int = 8
     max_insight_revisions: int = 2
     max_upload_mb: int = 50
+    # A planning or running run with no progress for this long was interrupted (e.g. a restart).
+    run_stall_minutes: int = 20
     sql_row_limit: int = 200
     extract_max_rows: int = 2_000_000
     allow_private_db_hosts: bool | None = None  # defaults to True outside production

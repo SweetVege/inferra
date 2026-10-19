@@ -83,6 +83,20 @@ def plan_run(db: Session, payload: dict[str, Any]) -> None:
     run.plan = plan
     run.intent = plan["intent"]
     run.dataset_ids = plan["dataset_ids"]
+    add_steps(db, run, plan)
+    workspace = db.get(Workspace, run.workspace_id)
+    if workspace is not None and workspace.auto_approve_plans:
+        run.status = "running"
+        enqueue(db, "execute_run", run_id=run.id)
+    else:
+        run.status = "awaiting_approval"
+    db.commit()
+    rec.event(
+        "plan_ready", f"Plan ready: {plan['title']} ({len(plan['steps'])} steps)", intent=plan["intent"]
+    )
+
+
+def add_steps(db: Session, run: Run, plan: dict[str, Any]) -> None:
     for position, st in enumerate(plan["steps"]):
         db.add(
             Step(
@@ -94,16 +108,6 @@ def plan_run(db: Session, payload: dict[str, Any]) -> None:
                 depends_on=st["depends_on"],
             )
         )
-    workspace = db.get(Workspace, run.workspace_id)
-    if workspace is not None and workspace.auto_approve_plans:
-        run.status = "running"
-        enqueue(db, "execute_run", run_id=run.id)
-    else:
-        run.status = "awaiting_approval"
-    db.commit()
-    rec.event(
-        "plan_ready", f"Plan ready: {plan['title']} ({len(plan['steps'])} steps)", intent=plan["intent"]
-    )
 
 
 def _finish(db: Session, run: Run, status: str, error: str | None = None) -> None:
@@ -141,7 +145,7 @@ def _brief(
         f"Your task: {step.task}",
         "",
         "Datasets in scope (JSON):",
-        json.dumps(dataset_catalog(datasets), indent=1),
+        json.dumps(dataset_catalog(datasets, f"{run.goal} {step.task}"), indent=1),
     ]
     if done:
         lines += ["", "Results from earlier steps:"]
@@ -184,7 +188,7 @@ def execute_run(db: Session, payload: dict[str, Any]) -> None:
     completed: list[Step] = []
     for step in list(run.steps):
         db.refresh(run)
-        if run.status == "cancelled":
+        if run.status != "running":  # cancelled by a person, or marked stalled by recovery
             return
         if any(dep not in {s.key for s in completed} for dep in step.depends_on):
             step.status = "skipped"

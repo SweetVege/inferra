@@ -7,7 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from inferra import storage
-from inferra.api.schemas import DatasetDetail, DatasetOut, DatasetUpdate
+from inferra.api.schemas import (
+    DatasetDetail,
+    DatasetOut,
+    DatasetUpdate,
+    UploadComplete,
+    UploadStart,
+    UploadTicket,
+)
 from inferra.auth.session import WorkspaceAccess, workspace_access
 from inferra.config import get_settings
 from inferra.datasources.base import QueryError
@@ -82,6 +89,56 @@ def list_datasets(
         select(Dataset).where(Dataset.workspace_id == access.workspace.id).order_by(Dataset.created_at.desc())
     )
     return [_out(d) for d in rows]
+
+
+def _check_upload(filename: str, size: int) -> str:
+    name = Path(filename).name
+    if Path(name).suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(400, "Upload a CSV, TSV, Parquet, or Excel file.")
+    if size > get_settings().max_upload_mb * 1024 * 1024:
+        raise HTTPException(413, f"Files are limited to {get_settings().max_upload_mb} MB.")
+    return name
+
+
+@router.post("/uploads", response_model=UploadTicket)
+def start_upload(body: UploadStart, access: WorkspaceAccess = Depends(workspace_access)) -> UploadTicket:
+    """Large files go straight from the browser to object storage, not through the web proxy.
+    Without object storage (local development), the browser uses the multipart endpoint."""
+    access.require("editor")
+    _check_upload(body.filename, body.size)
+    if not storage.direct_uploads():
+        return UploadTicket(mode="form")
+    upload_id = new_id()
+    key = f"uploads/{access.workspace.id}/{upload_id}"
+    return UploadTicket(mode="direct", upload_id=upload_id, url=storage.presigned_put(key))
+
+
+@router.post("/uploads/{upload_id}/complete", response_model=DatasetOut, status_code=201)
+def complete_upload(
+    upload_id: str,
+    body: UploadComplete,
+    access: WorkspaceAccess = Depends(workspace_access),
+    db: Session = Depends(get_db),
+) -> DatasetOut:
+    access.require("editor")
+    if not storage.direct_uploads() or not upload_id.isalnum():
+        raise HTTPException(404, "Upload not found.")
+    key = f"uploads/{access.workspace.id}/{upload_id}"  # scoped to this workspace
+    size = storage.object_size(key)
+    if size is None:
+        raise HTTPException(404, "Upload not found. It may have expired; try again.")
+    try:
+        filename = _check_upload(body.filename, size)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / filename
+            storage.download_to(key, path)
+            try:
+                dataset = ingest_file(db, access.workspace.id, path, filename, access.user.id)
+            except QueryError as exc:
+                raise HTTPException(400, str(exc)) from exc
+    finally:
+        storage.delete_object(key)
+    return _out(dataset)
 
 
 @router.post("", response_model=DatasetOut, status_code=201)

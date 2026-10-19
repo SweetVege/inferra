@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from inferra.db.models import Alert, Artifact, Dataset, Run, Schedule, Step, User, Workspace
+from inferra.db.models import Alert, Artifact, Dataset, Run, Schedule, User, Workspace
 from inferra.runtime.queue import enqueue, handler
 from inferra.runtime.quota import run_quota
 from inferra.runtime.recorder import Recorder
@@ -202,17 +202,9 @@ def scheduled_run(db: Session, payload: dict[str, Any]) -> None:
     )
     db.add(run)
     db.flush()
-    for position, st in enumerate(schedule.plan.get("steps", [])):
-        db.add(
-            Step(
-                run_id=run.id,
-                key=st["key"],
-                position=position,
-                agent=st["agent"],
-                task=st["task"],
-                depends_on=st["depends_on"],
-            )
-        )
+    from inferra.runtime.executor import add_steps  # the executor imports this module
+
+    add_steps(db, run, schedule.plan)
     schedule.last_run_at, schedule.last_run_id = datetime.now(UTC), run.id
     rec = Recorder(db, run)
     rec.event("created", f"Scheduled re-run ({describe(schedule)})", schedule_id=schedule.id)
