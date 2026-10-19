@@ -46,15 +46,22 @@ def fetch(
 
 
 def to_numeric(series: pd.Series) -> pd.Series:
-    """Booleans and 'true'/'false' strings become 0/1; other values are coerced to numbers."""
-    if series.dtype == bool:
-        return series.astype(float)
-    if series.dtype == object:
+    """A float64 series. Booleans and 'true'/'false' strings become 0/1, dates become days since
+    1970 and durations become days; anything else is coerced to a number. Nullable columns (which
+    DuckDB returns for joins with missing values) become plain floats with NaN."""
+    dtype = series.dtype
+    if pd.api.types.is_bool_dtype(dtype):
+        return series.astype("float64")
+    if pd.api.types.is_datetime64_any_dtype(dtype):
+        return (series - pd.Timestamp(0, tz=getattr(dtype, "tz", None))).dt.total_seconds() / 86400
+    if pd.api.types.is_timedelta64_dtype(dtype):
+        return series.dt.total_seconds() / 86400
+    if pd.api.types.is_object_dtype(dtype) or pd.api.types.is_string_dtype(dtype):
         lowered = series.astype("string").str.strip().str.lower()
         mapped = lowered.map({"true": 1.0, "false": 0.0, "yes": 1.0, "no": 0.0})
         if mapped.notna().sum() >= series.notna().sum() * 0.99:
-            return mapped.astype(float)
-    return pd.to_numeric(series, errors="coerce")
+            return mapped.astype("float64")
+    return pd.to_numeric(series, errors="coerce").astype("float64")
 
 
 def is_categorical(source: DataSource, table: str, column: str, series: pd.Series) -> bool:
@@ -163,7 +170,7 @@ def fit_regression(ctx: ToolContext, args: RegressionInput) -> ToolOutput:
     vif = []
     features_only = exog.drop(columns="const")
     if features_only.shape[1] > 1:
-        corr_inv = np.linalg.pinv(np.corrcoef(features_only.values, rowvar=False))
+        corr_inv = np.linalg.pinv(np.corrcoef(features_only.to_numpy(dtype=float), rowvar=False))
         vif = [{"term": t, "vif": float(corr_inv[i, i])} for i, t in enumerate(features_only.columns)]
         high = [v["term"] for v in vif if v["vif"] > 10]
         if high:
