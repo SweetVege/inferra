@@ -428,7 +428,7 @@ def train_model(ctx: ToolContext, args: TrainInput) -> ToolOutput:
     )
     metrics = {"cv": result["cv"], "holdout": result["holdout"], "baseline": result["baseline"]}
     return ToolOutput(
-        result={**result, "calibration": result["calibration"][:5]},
+        result=result,  # all ten calibration bins: the high-score bins are where a churn model is used
         artifact=ArtifactDraft("model", f"Model: {name}", result),
         code=sql,
         model=ModelDraft(
