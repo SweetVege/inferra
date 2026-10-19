@@ -109,3 +109,11 @@ def test_a_query_too_big_for_memory_fails_alone(orders_csv: Path, monkeypatch: p
     with pytest.raises(QueryError, match="Out of Memory"):
         source.query(big)
     assert source.query("SELECT count(*) AS n FROM orders").rows[0]["n"] == 2412  # the next query is fine
+
+
+def test_create_in_sql_points_to_the_view_tool(orders_csv: Path) -> None:
+    source = make_source(orders_csv)
+    with pytest.raises(QueryError, match="create_view"):
+        source.query("CREATE OR REPLACE TEMP VIEW v AS SELECT * FROM orders; SELECT count(*) FROM v")
+    with pytest.raises(QueryError, match="create_view"):
+        source.query("CREATE TABLE t AS SELECT 1 AS x")

@@ -78,6 +78,7 @@ def test_explore_run_end_to_end(client: TestClient, orders_csv: Path) -> None:
     notes = [b["text"] for b in specialist[0].messages[-1]["content"] if b.get("type") == "text"]
     assert notes == ["Tool calls left in this step: 7."]
     assert "run it now and report what it showed" in specialist[0].system
+    assert "only when no tool you have can test it" in specialist[0].system
 
     # Human review: accept one, edit another, reject the third.
     first, second, third = run["insights"]

@@ -169,6 +169,11 @@ class FileSource:
             statements = con.extract_statements(sql)
         except duckdb.Error as exc:
             raise QueryError(f"SQL could not be parsed: {exc}") from exc
+        if any(st.type == duckdb.StatementType.CREATE for st in statements):
+            raise QueryError(
+                "CREATE is not allowed here. To name a query for later calls, use the create_view tool "
+                "with one SELECT; otherwise send the SELECT on its own (a WITH clause works too)."
+            )
         if len(statements) != 1:
             raise QueryError("Send exactly one SQL statement.")
         if statements[0].type != duckdb.StatementType.SELECT:

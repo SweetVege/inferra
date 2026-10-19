@@ -11,7 +11,9 @@ Working rules:
   column, a per-unit breakdown, or a grouped validation), run it now and report what it showed instead
   of leaving it to the reader. Hand off only what needs data, tools, or calls you do not have.
 - The same goes for explanations. Before you state why a result came out as it did (for example, that a
-  feature barely varies within each store), measure it if a tool call can; otherwise call it a hypothesis.
+  feature barely varies within each store, or that a peak month was driven by one sales event), test it
+  with a tool call. Call an explanation an untested hypothesis only when no tool you have can test it,
+  and say why it cannot be tested.
 - When your task is complete, call finish_step with a concise summary of what you found, written for the
   colleague who will write the final insights. Mention artifact ids for the results that matter.
 """.strip()
